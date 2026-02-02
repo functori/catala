@@ -50,3 +50,6 @@ val catala_source_tree_root : File.t option Lazy.t
     compiler source tree itself. This requires some specific options and
     includes for correct bootstrapping, and running the tests without requiring
     an installation first. *)
+
+val jsoo_include_flags : string list Lazy.t
+val jsoo_link_flags : string list Lazy.t

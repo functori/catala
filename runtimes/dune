@@ -14,7 +14,8 @@
   (ocaml/catala_runtime.cmi as runtime/ocaml/catala_runtime.cmi)
   (ocaml/dates_calc.ml as runtime/ocaml/dates_calc.ml)
   (ocaml/dates_calc.mli as runtime/ocaml/dates_calc.mli)
-  (ocaml/dates_calc.cmi as runtime/ocaml/dates_calc.cmi))
+  (ocaml/dates_calc.cmi as runtime/ocaml/dates_calc.cmi)
+  (ocaml/runtime.cma as runtime/ocaml/runtime.cma))
  (section lib))
 
 (install
@@ -22,7 +23,8 @@
   (jsoo/dates_calc_jsoo.ml as runtime/jsoo/dates_calc_jsoo.ml)
   (jsoo/dates_calc_jsoo.mli as runtime/jsoo/dates_calc_jsoo.mli)
   (jsoo/catala_runtime_jsoo.ml as runtime/jsoo/catala_runtime_jsoo.ml)
-  (jsoo/catala_runtime_jsoo.mli as runtime/jsoo/catala_runtime_jsoo.mli))
+  (jsoo/catala_runtime_jsoo.mli as runtime/jsoo/catala_runtime_jsoo.mli)
+  (jsoo/runtime_jsoo.cma as runtime/jsoo/runtime_jsoo.cma))
  (section lib))
 
 ; Python runtime

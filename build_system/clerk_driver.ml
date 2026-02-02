@@ -143,7 +143,7 @@ let backend_obj_extensions =
     Clerk_rules.Python, [];
     Clerk_rules.Java, ["class"];
     Clerk_rules.Tests, [];
-    Clerk_rules.Jsoo, [];
+    Clerk_rules.Jsoo, ["cmo"];
   ]
 
 let backend_extensions =

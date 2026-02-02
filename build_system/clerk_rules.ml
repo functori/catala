@@ -75,6 +75,7 @@ module Var = struct
   let java = make "JAVA"
   let js_of_ocaml_exe = make "JS_OF_OCAML_EXE"
   let js_of_ocaml_flags = make "JS_OF_OCAML_FLAGS"
+  let jsoo_include = make "JSOO_INCLUDE"
   let all_vars = all_vars_ref.contents
 
   (* Definition spreading different rules *)
@@ -257,6 +258,11 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
       def Var.catala_flags_jsoo (lazy catala_flags_jsoo);
       def Var.js_of_ocaml_exe (lazy ["js_of_ocaml"]);
       def Var.js_of_ocaml_flags (lazy []);
+      def Var.jsoo_include
+        (lazy
+          (Lazy.force Poll.jsoo_include_flags
+          @ includes ~backend:"ocaml" ()
+          @ includes ~backend:"jsoo" ()));
     ]
   else []
 
@@ -297,11 +303,23 @@ let[@ocamlformat "disable"] static_base_rules enabled_backends =
            "-o"; !output]
         ~description:["<ocaml>"; "⇒"; !output];
     ] else []) @
-  (if List.mem Jsoo enabled_backends then [
+  (if List.mem Jsoo enabled_backends then
+     let ocaml_runtime_include, jsoo_runtime_include =
+       File.(Var.(!builddir) / Scan.libcatala / "ocaml"),
+       File.(Var.(!builddir) / Scan.libcatala / "jsoo")
+     in
+     [
       Nj.rule "catala-jsoo"
         ~command:[!catala_exe; "jsoo"; !catala_flags; !catala_flags_jsoo;
                   "-o"; !output; "--"; !input]
         ~description:["<catala>"; "jsoo"; "⇒"; !output];
+      Nj.rule "jsoo-bytobject"
+        ~command:[
+          !ocamlc_exe; "-c"; !ocaml_flags; !jsoo_include;
+          "-I"; ocaml_runtime_include; "-I"; jsoo_runtime_include; !includes; !input
+        ]
+        ~description:["<ocamlc>"; "⇒"; !output];
+
     ]
    else []
   ) @
@@ -523,7 +541,6 @@ let gen_build_statements
             ]
       in
       let jsoo =
-        (* todo: not sure *)
         if not (List.mem Jsoo enabled_backends) then Seq.empty
         else
           let ml, missing = extern_src ~suffix:"_jsoo" "jsoo" "ml" [] in
@@ -725,6 +742,26 @@ let gen_build_statements
       else []
     | _ -> []
   in
+  let jsoo_ocamlc =
+    [
+      Nj.build "jsoo-bytobject"
+        ~inputs:[target ~suffix:"_jsoo" ~backend:"jsoo" "ml"]
+        ~outputs:[target ~suffix:"_jsoo" ~backend:"jsoo" "cmo"]
+        ~vars:
+          [
+            Var.includes, include_flags "ocaml";
+            ( Var.ocaml_flags,
+              [
+                Var.(!ocaml_flags);
+                "-w";
+                "@1..3@5..28@31..39@43@46..47@49..57@61..62@69-40";
+                "-bin-annot";
+                "-bin-annot-occurrences";
+                "-no-alias-deps";
+              ] );
+          ];
+    ]
+  in
   let tests =
     if not (item.has_inline_tests || Lazy.force item.has_scope_tests) then []
     else
@@ -748,7 +785,9 @@ let gen_build_statements
     @ (if List.mem Python enabled_backends then [python] else [])
     @ (if List.mem Java enabled_backends then [java; Seq.return javac] else [])
     @ (if List.mem Tests enabled_backends then [List.to_seq tests] else [])
-    @ if List.mem Jsoo enabled_backends then [jsoo] else []
+    @
+    if List.mem Jsoo enabled_backends then [jsoo; List.to_seq jsoo_ocamlc]
+    else []
   in
   Seq.concat (List.to_seq statements_list)
 
@@ -1037,6 +1076,17 @@ let runtime_build_statements ~config enabled_backends =
             File.with_extension ~suffix:"_jsoo" runtime_base "mli";
           ]
         ~outputs:["@runtime-jsoo-src"];
+      Nj.build "phony"
+        ~inputs:
+          [
+            File.with_extension ~suffix:"_jsoo" dates_base "ml";
+            File.with_extension ~suffix:"_jsoo" dates_base "mli";
+            File.with_extension ~suffix:"_jsoo" runtime_base "ml";
+            File.with_extension ~suffix:"_jsoo" runtime_base "mli";
+            File.with_extension (stdbase / "ocaml" / "catala_runtime") "cma";
+            File.with_extension ~suffix:"_jsoo" runtime_base "cma";
+          ]
+        ~implicit_in:[] ~outputs:["@runtime-jsoo"];
       Nj.build "copy"
         ~inputs:[jsoo_src / "catala_runtime_jsoo.mli"]
         ~outputs:[File.with_extension ~suffix:"_jsoo" runtime_base "mli"];
@@ -1049,6 +1099,13 @@ let runtime_build_statements ~config enabled_backends =
       Nj.build "copy"
         ~inputs:[jsoo_src / "dates_calc_jsoo.ml"]
         ~outputs:[File.with_extension ~suffix:"_jsoo" dates_base "ml"];
+      Nj.build "copy"
+        ~inputs:[Var.(!runtime) / "ocaml" / "runtime.cma"]
+        ~outputs:
+          [File.with_extension (stdbase / "ocaml" / "catala_runtime") "cma"];
+      Nj.build "copy"
+        ~inputs:[jsoo_src / "runtime_jsoo.cma"]
+        ~outputs:[File.with_extension ~suffix:"_jsoo" runtime_base "cma"];
     ]
   else []
 

@@ -118,26 +118,30 @@ let stdlib_dir =
 let ocaml_runtime_dir : File.t Lazy.t =
   lazy File.(Lazy.force runtime_dir / "ocaml")
 
+let gen_include_and_lib_flags :
+    ?native:bool -> string list -> string list * string list =
+ fun ?(native = true) link_libs ->
+  let includes_libs =
+    List.map
+      (fun lib ->
+        match File.(check_directory (Lazy.force ocaml_libdir / lib)) with
+        | None ->
+          Message.error
+            "Required OCaml library not found at %a.@ Try `opam install %s'"
+            File.format
+            File.(Lazy.force ocaml_libdir / lib)
+            lib
+        | Some d ->
+          ( ["-I"; d],
+            String.map (function '-' -> '_' | c -> c) lib
+            ^ if native then ".cmxa" else ".cma" ))
+      link_libs
+  in
+  let includes, libs = List.split includes_libs in
+  List.concat includes, libs
+
 let ocaml_include_and_lib_flags : (string list * string list) Lazy.t =
-  lazy
-    (let link_libs = ["zarith"] in
-     let includes_libs =
-       List.map
-         (fun lib ->
-           match File.(check_directory (Lazy.force ocaml_libdir / lib)) with
-           | None ->
-             Message.error
-               "Required OCaml library not found at %a.@ Try `opam install %s'"
-               File.format
-               File.(Lazy.force ocaml_libdir / lib)
-               lib
-           | Some d ->
-             ( ["-I"; d],
-               String.map (function '-' -> '_' | c -> c) lib ^ ".cmxa" ))
-         link_libs
-     in
-     let includes, libs = List.split includes_libs in
-     List.concat includes, libs)
+  lazy (gen_include_and_lib_flags ["zarith"])
 
 let ocaml_include_flags : string list Lazy.t =
   lazy (fst (Lazy.force ocaml_include_and_lib_flags))
@@ -152,3 +156,14 @@ let python_runtime_dir : File.t Lazy.t =
 
 let java_runtime_dir : File.t Lazy.t =
   lazy File.(Lazy.force runtime_dir / "java")
+
+let jsoo_include_and_lib_flags : (string list * string list) Lazy.t =
+  lazy
+    (gen_include_and_lib_flags ~native:false
+       ["js_of_ocaml"; "zarith"; "zarith_stubs_js"])
+
+let jsoo_include_flags : string list Lazy.t =
+  lazy (fst (Lazy.force jsoo_include_and_lib_flags))
+
+let jsoo_link_flags : string list Lazy.t =
+  lazy (snd (Lazy.force jsoo_include_and_lib_flags))
