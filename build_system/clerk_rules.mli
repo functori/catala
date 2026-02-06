@@ -62,6 +62,7 @@ val run_ninja :
   autotest:bool ->
   ?clean_up_env:bool ->
   ?ninja_flags:string list ->
+  ?module_targets:string list ->
   (Format.formatter -> Clerk_scan.item list -> (Var.t * string list) list -> 'a) ->
   'a
 (** Scan the source tree, run a ninja process, and send to it the expected build
