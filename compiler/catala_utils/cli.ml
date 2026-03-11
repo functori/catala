@@ -284,15 +284,6 @@ module Flags = struct
              is set, or to $(b,_build) otherwise, consistently with the \
              defaults used by clerk to create these files."
 
-    let gen_external =
-      value
-      & flag
-      & info ["gen-external"]
-          ~doc:
-            "Run on a file defining an external module, this generates \
-             template files in the target language, to be used as a basis for \
-             writing the corresponding implementation."
-
     let flags =
       let make
           language
@@ -309,8 +300,7 @@ module Flags = struct
           stop_on_error
           no_fail_on_assert
           whole_program
-          bin_dir
-          gen_external : options =
+          bin_dir : options =
         if debug then Printexc.record_backtrace true;
         let path_rewrite =
           match directory with
@@ -357,7 +347,7 @@ module Flags = struct
         Global.enforce_options ~language ~debug ~color ~message_format ~trace
           ~trace_format ~output_format ~plugins_dirs ~disable_warnings
           ~max_prec_digits ~path_rewrite ~stop_on_error ~no_fail_on_assert
-          ~whole_program ~bin_dir ~gen_external ()
+          ~whole_program ~bin_dir ()
       in
       Term.(
         const make
@@ -375,8 +365,7 @@ module Flags = struct
         $ stop_on_error
         $ no_fail_on_assert
         $ whole_program
-        $ bin_dir
-        $ gen_external)
+        $ bin_dir)
 
     let options =
       let make input_src name directory options : options =
@@ -611,6 +600,15 @@ module Flags = struct
     & opt (some string) None
     & info ["prefix"] ~docv:"PATH"
         ~doc:"Prepend the given path to each of the files in the returned list."
+
+  let gen_external =
+    value
+    & flag
+    & info ["gen-external"]
+        ~doc:
+          "Run on a file defining an external module, this generates template \
+           files in the target language, to be used as a basis for writing the \
+           corresponding implementation."
 
   let subdir =
     value

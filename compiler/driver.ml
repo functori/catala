@@ -1182,8 +1182,10 @@ module Commands = struct
       optimize
       check_invariants
       autotest
-      closure_conversion =
-    let options = if closure_conversion then fix_trace options else options in
+      closure_conversion
+      gen_external =
+    if closure_conversion then ignore @@ fix_trace options;
+    let options = Global.enforce_options ~gen_external () in
     let prg, type_ordering, _ =
       Passes.lcalc options ~includes ~stdlib ~optimize ~check_invariants
         ~autotest ~typed:Expr.typed ~closure_conversion ~keep_special_ops:true
@@ -1192,7 +1194,7 @@ module Commands = struct
     in
     Message.debug "Compiling program into OCaml...";
     get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.ml" else "ml")
+      ~ext:(if !Global.gen_external then "template.ml" else "ml")
     @@ fun output_file fmt ->
     let hashf = Hash.finalise ~monomorphize_types:false in
     Lcalc.To_ocaml.format_program output_file fmt prg ~hashf type_ordering
@@ -1210,7 +1212,8 @@ module Commands = struct
         $ Cli.Flags.optimize
         $ Cli.Flags.check_invariants
         $ Cli.Flags.autotest
-        $ Cli.Flags.closure_conversion)
+        $ Cli.Flags.closure_conversion
+        $ Cli.Flags.gen_external)
 
   let jsoo
       options
@@ -1220,7 +1223,8 @@ module Commands = struct
       optimize
       check_invariants
       autotest
-      closure_conversion =
+      closure_conversion
+      _gen_external =
     let options = if closure_conversion then fix_trace options else options in
     let prg, type_ordering, _ =
       Passes.lcalc options ~includes ~stdlib ~optimize ~check_invariants
@@ -1229,9 +1233,7 @@ module Commands = struct
         ~renaming:(Some Lcalc.To_ocaml.renaming)
     in
     Message.debug "Compiling program to generate Js_of_ocaml interface...";
-    get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.ml" else "ml")
-      ~suffix:"_jsoo"
+    get_output_format options output ~ext:"ml" ~suffix:"_jsoo"
     @@ fun output_file fmt ->
     let hashf = Hash.finalise ~monomorphize_types:false in
     Lcalc.To_jsoo_interface.format_program output_file fmt prg ~hashf
@@ -1252,7 +1254,8 @@ module Commands = struct
         $ Cli.Flags.optimize
         $ Cli.Flags.check_invariants
         $ Cli.Flags.autotest
-        $ Cli.Flags.closure_conversion)
+        $ Cli.Flags.closure_conversion
+        $ Cli.Flags.gen_external)
 
   let binding_jsoo
       options
@@ -1263,8 +1266,7 @@ module Commands = struct
       check_invariants
       autotest
       closure_conversion =
-    let () = if closure_conversion then ignore @@ fix_trace options in
-    let options = Global.enforce_options ~gen_external:true () in
+    let options = if closure_conversion then fix_trace options else options in
     let prg, type_ordering, _ =
       Passes.lcalc options ~includes ~stdlib ~optimize ~check_invariants
         ~autotest ~typed:Expr.typed ~closure_conversion ~keep_special_ops:true
@@ -1274,14 +1276,13 @@ module Commands = struct
     (* The goal is to shadow the real implementation of the ml file. So we don't
        append a suffix like _jsoo*)
     Message.debug "Compiling program to generate Js_of_ocaml interface...";
-    get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.ml" else "ml")
+    get_output_format options output ~ext:"ml"
     @@ fun output_file fmt ->
     let hashf = Hash.finalise ~monomorphize_types:false in
     Lcalc.From_jsoo_interface.format_program output_file fmt prg ~hashf
       type_ordering
 
-  let binding_jsoo =
+  let binding_jsoo_cmd =
     Cmd.v
       (Cmd.info "binding-jsoo" ~man:Cli.man_base
          ~doc:
@@ -1367,8 +1368,10 @@ module Commands = struct
       optimize
       check_invariants
       autotest
-      closure_conversion =
-    let options = if closure_conversion then fix_trace options else options in
+      closure_conversion
+      gen_external =
+    if closure_conversion then ignore @@ fix_trace options;
+    let options = Global.enforce_options ~gen_external () in
     let prg, type_ordering, _ren_ctx =
       Passes.scalc options ~includes ~stdlib ~optimize ~check_invariants
         ~autotest ~closure_conversion ~keep_special_ops:false
@@ -1378,7 +1381,7 @@ module Commands = struct
     in
     Message.debug "Compiling program into Python...";
     get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.py" else "py")
+      ~ext:(if !Global.gen_external then "template.py" else "py")
     @@ fun output_file fmt ->
     Scalc.To_python.format_program output_file fmt prg type_ordering
 
@@ -1395,7 +1398,8 @@ module Commands = struct
         $ Cli.Flags.optimize
         $ Cli.Flags.check_invariants
         $ Cli.Flags.autotest
-        $ Cli.Flags.closure_conversion)
+        $ Cli.Flags.closure_conversion
+        $ Cli.Flags.gen_external)
 
   let java
       options
@@ -1405,8 +1409,10 @@ module Commands = struct
       optimize
       check_invariants
       autotest
-      closure_conversion =
-    let options = fix_trace options in
+      closure_conversion
+      gen_external =
+    ignore @@ fix_trace options;
+    let options = Global.enforce_options ~gen_external () in
     let prg, _type_ordering, _ren_ctx =
       Passes.scalc options ~includes ~stdlib ~optimize ~check_invariants
         ~autotest ~closure_conversion ~keep_special_ops:false
@@ -1416,14 +1422,14 @@ module Commands = struct
     in
     Message.debug "Compiling program into Java...";
     get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.java" else "java")
+      ~ext:(if !Global.gen_external then "template.java" else "java")
     @@ fun output_file ppf ->
     let class_name =
       match output_file, options.Global.input_src with
       | Some file, _
       | None, (FileName (file : File.t) | Contents (_, (file : File.t))) ->
         let name = File.remove_extension file |> Filename.basename in
-        if Global.options.gen_external then
+        if !Global.gen_external then
           String.capitalize_ascii (File.remove_extension name)
         else name
       | None, Stdin _ -> "AnonymousClass"
@@ -1443,10 +1449,20 @@ module Commands = struct
         $ Cli.Flags.optimize
         $ Cli.Flags.check_invariants
         $ Cli.Flags.autotest
-        $ Cli.Flags.closure_conversion)
+        $ Cli.Flags.closure_conversion
+        $ Cli.Flags.gen_external)
 
-  let c options includes stdlib output optimize check_invariants autotest =
-    let options = fix_trace options in
+  let c
+      options
+      includes
+      stdlib
+      output
+      optimize
+      check_invariants
+      autotest
+      gen_external =
+    ignore @@ fix_trace options;
+    let options = Global.enforce_options ~gen_external () in
     let prg, type_ordering, _ren_ctx =
       Passes.scalc options ~includes ~stdlib ~optimize ~check_invariants
         ~autotest ~closure_conversion:true ~keep_special_ops:false
@@ -1456,7 +1472,7 @@ module Commands = struct
     in
     Message.debug "Compiling program into C...";
     get_output_format options output
-      ~ext:(if Global.options.gen_external then "template.c" else "c")
+      ~ext:(if !Global.gen_external then "template.c" else "c")
     @@ fun output_file ppf ->
     Scalc.To_c.format_program output_file ppf prg type_ordering
 
@@ -1472,7 +1488,8 @@ module Commands = struct
         $ Cli.Flags.output
         $ Cli.Flags.optimize
         $ Cli.Flags.check_invariants
-        $ Cli.Flags.autotest)
+        $ Cli.Flags.autotest
+        $ Cli.Flags.gen_external)
 
   let depends options includes stdlib prefix subdir extension extra_files =
     let file = Global.input_src_file options.Global.input_src in
@@ -1631,7 +1648,7 @@ module Commands = struct
       proof_cmd;
       ocaml_cmd;
       jsoo_cmd;
-      binding_jsoo;
+      binding_jsoo_cmd;
       python_cmd;
       java_cmd;
       c_cmd;
