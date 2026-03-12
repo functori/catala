@@ -708,3 +708,112 @@ let format_program
   Format.pp_print_flush ppi ();
   Option.iter Ocamlformat.format output_file;
   Option.iter Ocamlformat.format intf_file
+
+let lit_mock_var_js (l : typ_lit) : string =
+  match l with
+  | TUnit -> "0"
+  | TBool -> "true"
+  | TInt -> "0n"
+  | TRat -> "{n : 0n, d: 0n}"
+  | TMoney -> "0n"
+  | TDuration -> "{ years: 1, months: 1, days: 1 }"
+  | TDate -> "{ year: 1970, month: 1, day: 1 }"
+  | TPos ->
+    {|{fileName : "file", startLine: 0, endLine: 0, endColumn: 0, lawHeadings: []}|}
+
+let format_mock_var_js (ctx : decl_ctx) (fmt : Format.formatter) (typ : typ) :
+    unit =
+  let rec aux bctx fmt typ =
+    match Mark.remove typ with
+    | TLit l -> Format.fprintf fmt "%s" (lit_mock_var_js l)
+    | TTuple [] -> Format.fprintf fmt "[]"
+    | TTuple typs ->
+      Format.fprintf fmt "[%a]"
+        (Format.pp_print_list
+           ~pp_sep:(fun ppf () -> Format.fprintf ppf ", ")
+           (aux bctx))
+        typs
+    | TStruct _s -> Format.fprintf fmt "{}"
+    | TOption t -> Format.fprintf fmt "@[<v 2>[%a]@]" (aux bctx) t
+    | TDefault t -> aux bctx fmt t
+    | TEnum e ->
+      let every_cons = EnumName.Map.find e ctx.ctx_enums in
+      let variant, typ =
+        EnumConstructor.Map.find_first (fun _ -> true) every_cons
+      in
+      Format.fprintf fmt "{%a: %a}" EnumConstructor.format variant (aux bctx)
+        typ
+    | TAbstract _e -> Format.fprintf fmt "0"
+    | TArrow (t1, t2) ->
+      Format.fprintf fmt "@[<v 2>(%a)@]"
+        (Format.pp_print_list
+           ~pp_sep:(fun fmt () -> Format.fprintf fmt ", ")
+           (aux bctx))
+        (t1 @ [t2])
+    | TArray t1 -> Format.fprintf fmt "[@,%a@]@,]" (aux bctx) t1
+    | TVar v ->
+      let name = Bindlib.name_of v in
+      let name =
+        if String.starts_with ~prefix:"'" name then
+          "a" ^ String.sub name 1 (String.length name - 1)
+        else "t" ^ name
+      in
+      Format.fprintf fmt "'%s" name
+    | TForAll tb ->
+      let _v, typ, bctx = Bindlib.unmbind_in bctx tb in
+      aux bctx fmt typ
+    | TClosureEnv -> Format.fprintf fmt "Js.Unsafe.any"
+    | TError -> assert false
+  in
+  aux Bindlib.empty_ctxt fmt typ
+
+let format_code_items_js
+    (ctx : decl_ctx)
+    (ppjs : Format.formatter)
+    (code_items : 'm Ast.expr code_item_list) =
+  pp [ppjs] "@[<v>";
+  let _exports =
+    BoundList.iter code_items ~f:(fun var item ->
+        match item with
+        | Topdef (_name, typ, vis, _e) ->
+          if vis = Public then
+            let rec aux bctx typ =
+              match Mark.remove typ with
+              | TArrow (lt, te) | TDefault (TArrow (lt, te), _) ->
+                let ip, _ie = ref (-1), ref (-1) in
+                Format.fprintf ppjs
+                  "@[<v 2>%a: function(%a){@,@[<v 2>return %a;@]@]@,},@,"
+                  format_var var
+                  (Format.pp_print_list
+                     ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ ,")
+                     (fun fmt _t ->
+                       incr ip;
+                       Format.fprintf fmt "_param%d" !ip))
+                  lt (format_mock_var_js ctx) te
+              | TForAll tb ->
+                let _v, typ, bctx = Bindlib.unmbind_in bctx tb in
+                aux bctx typ
+              | _ ->
+                Format.fprintf ppjs "@[<v 2>%a: %a@]" format_var var
+                  (format_mock_var_js ctx) typ
+            in
+            aux Bindlib.empty_ctxt typ
+        | ScopeDef (_name, _body) -> ())
+  in
+  pp [ppjs] "@]"
+
+let format_js_template ppjs name (p : 'm Ast.program) : unit =
+  pp [ppjs]
+    "// Mock for the catala external: %s\n\
+     //\n\
+     // This file must be loaded before the js file containing the call to the \
+     external contract (with a <script> balise or a require).\n"
+    name;
+  Option.fold
+    ~none:(pp [ppjs] "@[<v 2>{@,%a}]")
+    ~some:(fun (modname, _) ->
+      pp [ppjs] "@[<v 2>globalThis.%s = {@,%a@]@,}"
+        (ModuleName.to_string modname))
+    p.module_name
+    (format_code_items_js p.decl_ctx)
+    p.code_items
