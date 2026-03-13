@@ -310,7 +310,16 @@ let[@ocamlformat "disable"] static_base_rules enabled_backends =
            "-o"; !output]
         ~description:["<ocaml>"; "⇒"; !output];
     ] else []) @
-  (if List.mem Jsoo enabled_backends then [
+  (if List.mem Jsoo enabled_backends then
+        let runtime_include =
+          File.(Var.(!builddir) / Scan.libcatala / "jsoo")
+        in
+         [
+      Nj.rule "jsoo-bytobject"
+        ~command:[
+          !ocamlc_exe; "-c"; !ocaml_flags; !jsoo_include; "-I"; runtime_include; !includes; !ppx; !input
+        ]
+        ~description:["<ocaml>"; "⇒"; !output];
       Nj.rule "catala-jsoo"
         ~command:[!catala_exe; "jsoo"; !catala_flags; !catala_flags_jsoo;
                   "-o"; !output; "--"; !input]
@@ -591,7 +600,7 @@ let gen_build_statements
       [
         Nj.build "ocaml-bytobject"
           ~inputs:[target ~backend:"ocaml" "mli"; target ~backend:"ocaml" "ml"]
-          ~implicit_in:(List.map module_target modules @ ["@runtime-cmi"])
+          ~implicit_in:(List.map module_target modules @ ["@runtime-cmi-ocaml"])
           ~outputs:(List.map (target ~backend:"ocaml") ["cmi"; "cmo"])
           ~vars:
             [
@@ -618,7 +627,7 @@ let gen_build_statements
           ~inputs:[target ~backend:"ocaml" "ml"]
           ~implicit_in:
             ((target ~backend:"ocaml" "cmi" :: List.map module_target modules)
-            @ ["@runtime-cmi"])
+            @ ["@runtime-cmi-ocaml"])
           ~outputs:(List.map (target ~backend:"ocaml") ["cmx"; "o"])
           ~vars:[Var.includes, include_flags "ocaml"];
       ]
@@ -848,6 +857,178 @@ let dir_test_rules dir subdirs enabled_backends items =
       ]
   else Seq.empty
 
+let runtime_jsoo_statements
+    ~catala_runtime_jsoo
+    ~jsoo_src
+    ~dates_ocaml_base
+    ~runtime_ocaml_base
+    ~dates_jsoo_base
+    ~runtime_jsoo_base =
+  let open File in
+  [
+    Nj.build "phony"
+      ~inputs:
+        [
+          dates_jsoo_base -.- "cmo";
+          runtime_jsoo_base -.- "cmo";
+          "@runtime-jsoo-src";
+          "@runtime-jsoo-only";
+          "@original-runtime";
+        ]
+      ~outputs:["@runtime-jsoo"];
+    Nj.build "phony"
+      ~inputs:[runtime_jsoo_base -.- "cmo"; dates_jsoo_base -.- "cmo"]
+      ~implicit_in:["@runtime-cmi-jsoo"] ~outputs:["@runtime-jsoo-only"];
+    Nj.build "phony"
+      ~inputs:[runtime_ocaml_base -.- "cmo"; dates_ocaml_base -.- "cmo"]
+      ~outputs:["@original-runtime"];
+    Nj.build "phony"
+      ~inputs:[runtime_jsoo_base -.- "cmi"; dates_jsoo_base -.- "cmi"]
+      ~outputs:["@runtime-cmi-intf"];
+    Nj.comment "Jsoo interfaces copy";
+    Nj.build "copy"
+      ~inputs:[jsoo_src / "dates_calc_jsoo.cmi"]
+      ~outputs:[dates_jsoo_base -.- "cmi"];
+    Nj.build "copy"
+      ~inputs:[jsoo_src / "catala_runtime_jsoo.cmi"]
+      ~outputs:[runtime_jsoo_base -.- "cmi"];
+    Nj.comment "Jsoo files compilation";
+    Nj.build "jsoo-bytobject"
+      ~inputs:[runtime_jsoo_base -.- "ml"]
+      ~implicit_in:
+        [
+          runtime_jsoo_base -.- "cmi";
+          runtime_ocaml_base -.- "cmi";
+          dates_jsoo_base -.- "cmi";
+        ]
+      ~vars:
+        [
+          Var.includes, [Var.(!jsoo_include); "-I"; catala_runtime_jsoo];
+          Var.ppx, [Var.(!ppx_jsoo)];
+        ]
+      ~outputs:[runtime_jsoo_base -.- "cmo"];
+    Nj.build "jsoo-bytobject"
+      ~inputs:[dates_jsoo_base -.- "ml"]
+      ~implicit_in:[dates_jsoo_base -.- "cmi"; dates_ocaml_base -.- "cmi"]
+      ~vars:
+        [
+          Var.includes, [Var.(!jsoo_include); "-I"; catala_runtime_jsoo];
+          Var.ppx, [Var.(!ppx_jsoo)];
+        ]
+      ~outputs:[dates_jsoo_base -.- "cmo"];
+  ]
+
+let separation_comment ~comment =
+  [
+    Nj.comment "";
+    Nj.comment (Format.sprintf "--- %s --- #" comment);
+    Nj.comment "";
+  ]
+
+let runtime_jsoo ~stdbase ~dates_ocaml_base ~runtime_ocaml_base =
+  let open File in
+  let jsoo_src = Var.(!runtime) / "jsoo" in
+  let jsoo_base = stdbase / "jsoo" in
+  let dates_jsoo_base = jsoo_base / "dates_calc_jsoo" in
+  let runtime_jsoo_base = jsoo_base / "catala_runtime_jsoo" in
+  let runtime =
+    runtime_jsoo_statements ~catala_runtime_jsoo:jsoo_base ~jsoo_src
+      ~dates_ocaml_base ~runtime_ocaml_base ~dates_jsoo_base ~runtime_jsoo_base
+  in
+  separation_comment
+    ~comment:"Js of ocaml: Compilation of files required for every Catala files"
+  @ separation_comment ~comment:"Jsoo runtime sources"
+  @ [
+      Nj.build "phony"
+        ~inputs:
+          [
+            dates_ocaml_base -.- "ml";
+            runtime_ocaml_base -.- "ml";
+            dates_jsoo_base -.- "ml";
+            dates_jsoo_base -.- "mli";
+            runtime_jsoo_base -.- "ml";
+            runtime_jsoo_base -.- "mli";
+          ]
+        ~outputs:["@runtime-jsoo-src"];
+      Nj.build "copy"
+        ~inputs:[jsoo_src / "catala_runtime_jsoo.mli"]
+        ~outputs:[runtime_jsoo_base -.- "mli"];
+      Nj.build "copy"
+        ~inputs:[jsoo_src / "catala_runtime_jsoo.ml"]
+        ~outputs:[runtime_jsoo_base -.- "ml"];
+      Nj.build "copy"
+        ~inputs:[jsoo_src / "dates_calc_jsoo.mli"]
+        ~outputs:[dates_jsoo_base -.- "mli"];
+      Nj.build "copy"
+        ~inputs:[jsoo_src / "dates_calc_jsoo.ml"]
+        ~outputs:[dates_jsoo_base -.- "ml"];
+    ]
+  @ separation_comment ~comment:"Jsoo runtime compilation"
+  @ runtime
+
+let runtime_ocaml backend ~ocaml_src ~dates_base ~ocaml_base =
+  let open File in
+  let runtime_cmi, dates_cmi =
+    (* This one is tricky: in order for the catala interpreter to be able to
+       dynlink compiled Catala modules, we need to be sure that they have been
+       linked with a runtime abiding by the exact same cmi. Hence we need to
+       distribute the cmi with the runtime library, and to fetch it from dune's
+       _build when in the catala tree *)
+    if Lazy.force Poll.catala_source_tree_root = None then
+      ocaml_src / "catala_runtime.cmi", ocaml_src / "dates_calc.cmi"
+    else
+      ( Lazy.force Poll.runtime_dir
+        /../ "_build"
+        / "default"
+        / "runtimes"
+        / "ocaml"
+        / "catala_runtime.cmi",
+        Lazy.force Poll.runtime_dir
+        /../ "_build"
+        / "default"
+        / "runtimes"
+        / "ocaml"
+        / "dates_calc.cmi" )
+    (* This won't work if dune is not in its standard configuration and
+       "default" profile, but that won't affect anything outside of running
+       clerk from the catala source tree so it should be fine *)
+  in
+  separation_comment ~comment:"OCaml runtime sources"
+  @ [
+      Nj.build "phony"
+        ~inputs:
+          [
+            dates_base -.- "mli";
+            dates_base -.- "cmi";
+            ocaml_base -.- "mli";
+            ocaml_base -.- "cmi";
+          ]
+        ~outputs:["@runtime-cmi-" ^ backend];
+      Nj.build "phony"
+        ~inputs:
+          [
+            dates_base -.- "ml";
+            dates_base -.- "mli";
+            ocaml_base -.- "ml";
+            ocaml_base -.- "mli";
+          ]
+        ~outputs:["@runtime-src-" ^ backend];
+      Nj.build "copy"
+        ~inputs:[ocaml_src / "catala_runtime.mli"]
+        ~outputs:[ocaml_base -.- "mli"];
+      Nj.build "copy" ~inputs:[runtime_cmi] ~outputs:[ocaml_base -.- "cmi"];
+      Nj.build "copy" ~inputs:[dates_cmi] ~outputs:[dates_base -.- "cmi"];
+      Nj.build "copy"
+        ~inputs:[ocaml_src / "catala_runtime.ml"]
+        ~outputs:[ocaml_base -.- "ml"];
+      Nj.build "copy"
+        ~inputs:[dates_cmi -.- "ml"]
+        ~outputs:[dates_base -.- "ml"];
+      Nj.build "copy"
+        ~inputs:[dates_cmi -.- "mli"]
+        ~outputs:[dates_base -.- "mli"];
+    ]
+
 let runtime_build_statements ~config enabled_backends =
   let open File in
   let stdbase = Var.(!builddir) / Scan.libcatala in
@@ -863,74 +1044,20 @@ let runtime_build_statements ~config enabled_backends =
      let ocaml_src = Var.(!runtime) / "ocaml" in
      let dates_base = stdbase / "ocaml" / "dates_calc" in
      let ocaml_base = stdbase / "ocaml" / "catala_runtime" in
-     let runtime_cmi, dates_cmi =
-       (* This one is tricky: in order for the catala interpreter to be able to
-          dynlink compiled Catala modules, we need to be sure that they have
-          been linked with a runtime abiding by the exact same cmi. Hence we
-          need to distribute the cmi with the runtime library, and to fetch it
-          from dune's _build when in the catala tree *)
-       if Lazy.force Poll.catala_source_tree_root = None then
-         ocaml_src / "catala_runtime.cmi", ocaml_src / "dates_calc.cmi"
-       else
-         ( Lazy.force Poll.runtime_dir
-           /../ "_build"
-           / "default"
-           / "runtimes"
-           / "ocaml"
-           / "catala_runtime.cmi",
-           Lazy.force Poll.runtime_dir
-           /../ "_build"
-           / "default"
-           / "runtimes"
-           / "ocaml"
-           / "dates_calc.cmi" )
-       (* This won't work if dune is not in its standard configuration and
-          "default" profile, but that won't affect anything outside of running
-          clerk from the catala source tree so it should be fine *)
-     in
-     [
-       Nj.build "phony"
-         ~inputs:
-           [
-             dates_base -.- "mli";
-             dates_base -.- "cmi";
-             ocaml_base -.- "mli";
-             ocaml_base -.- "cmi";
-             Var.(!catala_exe);
-           ]
-         ~outputs:["@runtime-cmi"];
-       Nj.build "phony"
-         ~inputs:
-           [
-             dates_base -.- "ml";
-             dates_base -.- "mli";
-             ocaml_base -.- "ml";
-             ocaml_base -.- "mli";
-           ]
-         ~outputs:["@runtime-ocaml-src"];
-       Nj.build "phony"
-         ~inputs:[ocaml_base -.- "cmx"]
-         ~implicit_in:[dates_base -.- "cmi"]
-         ~outputs:["@runtime-ocaml"];
-       Nj.build "copy"
-         ~inputs:[ocaml_src / "catala_runtime.mli"]
-         ~outputs:[ocaml_base -.- "mli"];
-       Nj.build "copy" ~inputs:[runtime_cmi] ~outputs:[ocaml_base -.- "cmi"];
-       Nj.build "copy" ~inputs:[dates_cmi] ~outputs:[dates_base -.- "cmi"];
-       Nj.build "copy"
-         ~inputs:[ocaml_src / "catala_runtime.ml"]
-         ~outputs:[ocaml_base -.- "ml"];
-       Nj.build "copy"
-         ~inputs:[dates_cmi -.- "ml"]
-         ~outputs:[dates_base -.- "ml"];
-       Nj.build "copy"
-         ~inputs:[dates_cmi -.- "mli"]
-         ~outputs:[dates_base -.- "mli"];
-       Nj.build "ocaml-natobject"
-         ~inputs:[dates_base -.- "ml"; ocaml_base -.- "ml"]
-         ~implicit_in:[dates_base -.- "cmi"; ocaml_base -.- "cmi"]
-         ~outputs:[ocaml_base -.- "cmx"; ocaml_base -.- "o"];
-     ]
+     runtime_ocaml "ocaml" ~ocaml_src ~dates_base ~ocaml_base
+     @ [
+         Nj.build "phony"
+           ~inputs:[ocaml_base -.- "cmx"]
+           ~implicit_in:[dates_base -.- "cmi"]
+           ~outputs:["@runtime-ocaml"];
+         Nj.build "copy"
+           ~inputs:[ocaml_src / "catala_runtime.mli"]
+           ~outputs:[ocaml_base -.- "mli"];
+         Nj.build "ocaml-natobject"
+           ~inputs:[dates_base -.- "ml"; ocaml_base -.- "ml"]
+           ~implicit_in:[dates_base -.- "cmi"; ocaml_base -.- "cmi"]
+           ~outputs:[ocaml_base -.- "cmx"; ocaml_base -.- "o"];
+       ]
    else [])
   @ (if List.mem C enabled_backends then
        let c_base = stdbase / "c" / "catala_runtime" in
@@ -1089,32 +1216,24 @@ let runtime_build_statements ~config enabled_backends =
      else [])
   @
   if List.mem Jsoo enabled_backends then
-    let jsoo_src = Var.(!runtime) / "jsoo" in
+    let ocaml_src = Var.(!runtime) / "ocaml" in
     let dates_base = stdbase / "jsoo" / "dates_calc" in
     let runtime_base = stdbase / "jsoo" / "catala_runtime" in
-    [
-      Nj.build "phony"
-        ~inputs:
-          [
-            File.with_extension ~suffix:"_jsoo" dates_base "ml";
-            File.with_extension ~suffix:"_jsoo" dates_base "mli";
-            File.with_extension ~suffix:"_jsoo" runtime_base "ml";
-            File.with_extension ~suffix:"_jsoo" runtime_base "mli";
-          ]
-        ~outputs:["@runtime-jsoo-src"];
-      Nj.build "copy"
-        ~inputs:[jsoo_src / "catala_runtime_jsoo.mli"]
-        ~outputs:[File.with_extension ~suffix:"_jsoo" runtime_base "mli"];
-      Nj.build "copy"
-        ~inputs:[jsoo_src / "catala_runtime_jsoo.ml"]
-        ~outputs:[File.with_extension ~suffix:"_jsoo" runtime_base "ml"];
-      Nj.build "copy"
-        ~inputs:[jsoo_src / "dates_calc_jsoo.mli"]
-        ~outputs:[File.with_extension ~suffix:"_jsoo" dates_base "mli"];
-      Nj.build "copy"
-        ~inputs:[jsoo_src / "dates_calc_jsoo.ml"]
-        ~outputs:[File.with_extension ~suffix:"_jsoo" dates_base "ml"];
-    ]
+    runtime_ocaml "jsoo" ~ocaml_src ~dates_base ~ocaml_base:runtime_base
+    (* If the Jsoo backend is activated, it needs cmo files of OCaml runtime as
+       js_of_ocaml only works on bytecode *)
+    @ [
+        Nj.build "jsoo-bytobject"
+          ~inputs:[dates_base -.- "ml"]
+          ~implicit_in:[dates_base -.- "cmi"]
+          ~outputs:[dates_base -.- "cmo"];
+        Nj.build "jsoo-bytobject"
+          ~inputs:[runtime_base -.- "ml"]
+          ~implicit_in:[dates_base -.- "cmi"; runtime_base -.- "cmi"]
+          ~outputs:[runtime_base -.- "cmo"];
+      ]
+    @ runtime_jsoo ~stdbase ~dates_ocaml_base:dates_base
+        ~runtime_ocaml_base:runtime_base
   else []
 
 let output_ninja_file_header pp ~config ~enabled_backends ~var_bindings =
