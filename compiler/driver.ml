@@ -1208,7 +1208,12 @@ module Commands = struct
     if gen_external then
       get_output_format options output ~ext:"js"
       @@ fun _output_file fmt ->
-      Lcalc.From_jsoo_interface.format_js_template fmt "naming" prg
+      let module_name =
+        match prg.module_name with
+        | None -> ""
+        | Some (name, _) -> ModuleName.to_string name
+      in
+      Lcalc.From_jsoo_interface.format_js_template fmt module_name prg
     else (
       Message.debug "Compiling program to generate Js_of_ocaml interface...";
       get_output_format options output ~ext:"ml" ~suffix:"_jsoo"
