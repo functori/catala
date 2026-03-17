@@ -100,6 +100,8 @@ module Var = struct
   let ( ! ) = Nj.Var.v
 end
 
+let module_is_internal = String.ends_with ~suffix:"_internal"
+
 let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in
   let includes ?backend () =
@@ -294,7 +296,7 @@ let[@ocamlformat "disable"] static_base_rules enabled_backends =
         ~description:["<catala>"; "ocaml"; "⇒"; !output];
       Nj.rule "ocaml-bytobject"
         ~command:[
-          !ocamlc_exe; "-c"; !ocaml_flags; !ocaml_include; "-I"; runtime_include; !includes; !input
+          !ocamlc_exe; "-c"; !ocaml_flags; !ocaml_include; "-I"; runtime_include; !includes; !ppx; !input
         ]
         ~description:["<ocaml>"; "⇒"; !output];
 
@@ -385,6 +387,7 @@ let gen_build_statements
     (autotest : bool)
     (same_dir_modules : (string * File.t) list)
     ~is_stdlib
+    ~externls
     (item : Scan.item) : Nj.ninja =
   let open File in
   let ( ! ) = Var.( ! ) in
@@ -503,6 +506,8 @@ let gen_build_statements
   let ocaml, c, python, java, jsoo =
     if item.extrnal then
       let ocaml =
+        (* If the jsoo backend is enabled, external files are not written in
+           OCaml but in Javascript (exception for files from the stdlib) *)
         if not (List.mem OCaml enabled_backends) then Seq.empty
         else
           let ml, missing = extern_src "ocaml" "ml" [] in
@@ -651,7 +656,7 @@ let gen_build_statements
           ~inputs:[target ~backend:"ocaml" "ml"]
           ~implicit_in:
             ((target ~backend:"ocaml" "cmi" :: List.map module_target modules)
-            @ ["@runtime-cmi-ocaml"])
+            @ ["@runtime-cmi-ocaml"; Var.(!catala_exe)])
           ~outputs:(List.map (target ~backend:"ocaml") ["cmx"; "o"])
           ~vars:[Var.includes, include_flags "ocaml"];
       ]
@@ -679,6 +684,102 @@ let gen_build_statements
           ~vars:[Var.includes, include_flags "ocaml" @ ["-w"; "-24"]];
       ]
     else []
+  in
+  let jsoo_obj =
+    let catala_runtime_jsoo =
+      File.(Var.(!builddir) / Scan.libcatala / "jsoo")
+    in
+    (* If a catala file is marked as internal, its interface is not exposed in
+       JS. So we sould filter out those file. *)
+    let modules_jsoo =
+      List.filter_map
+        (fun used ->
+          if module_is_internal used then None
+          else if List.mem used externls then
+            Some (modfile ~backend:"jsoo" ".cmi" used)
+          else Some (modfile ~suffix:"_jsoo" ~backend:"jsoo" ".cmi" used))
+        modules
+    in
+
+    [
+      (* Compiler l'interface de bindings qui a été généré, elle a besoin des
+         cmi des modules jsoo, mais aussi de elle même sous forme jsoo *)
+      Nj.build "jsoo-bytobject"
+        ~inputs:[target ~backend:"jsoo" "mli"; target ~backend:"jsoo" "ml"]
+        ~implicit_in:
+          (Var.(!catala_exe)
+          :: List.map (modfile ~backend:"jsoo" ".cmo") modules)
+        ~outputs:(List.map (target ~backend:"jsoo") ["cmi"; "cmo"])
+        ~vars:
+          ([
+             ( Var.includes,
+               include_flags "jsoo"
+               @ (if item.extrnal then [Var.(!jsoo_include)] else [])
+               @ ["-I"; catala_runtime_jsoo] );
+             ( Var.ocaml_flags,
+               [
+                 Var.(!ocaml_flags);
+                 "-opaque";
+                 "-w";
+                 "@1..3@5..28@31..39@43@46..47@49..57@61..62@67@69-40";
+                 "-strict-sequence";
+                 "-strict-formats";
+                 "-short-paths";
+                 "-keep-locs";
+                 "-warn-error";
+                 "-a+8";
+                 "-w";
+                 "-67";
+                 "-bin-annot";
+                 "-no-alias-deps";
+               ] );
+           ]
+          @ if item.extrnal then [Var.ppx, [Var.(!ppx_jsoo)]] else []);
+    ]
+    @
+    if item.extrnal then []
+    else
+      [
+        Nj.build "jsoo-bytobject"
+          ~inputs:
+            [
+              target ~suffix:"jsoo" ~backend:"jsoo" "mli";
+              target ~suffix:"jsoo" ~backend:"jsoo" "ml";
+            ]
+          ~implicit_in:
+            ([
+               target ~backend:"jsoo" ".cmo";
+               "@runtime-cmi-intf";
+               Var.(!catala_exe);
+             ]
+            @ modules_jsoo)
+          ~outputs:
+            (List.map (target ~suffix:"jsoo" ~backend:"jsoo") ["cmi"; "cmo"])
+          ~vars:
+            [
+              ( Var.includes,
+                include_flags "jsoo"
+                @ [Var.(!jsoo_include); "-I"; catala_runtime_jsoo] );
+              ( Var.ocaml_flags,
+                [
+                  Var.(!ocaml_flags);
+                  "-opaque";
+                  "-w";
+                  "@1..3@5..28@31..39@43@46..47@49..57@61..62@67@69-40";
+                  "-strict-sequence";
+                  "-strict-formats";
+                  "-short-paths";
+                  "-keep-locs";
+                  "-warn-error";
+                  "-a+8";
+                  "-w";
+                  "-67";
+                  "-bin-annot";
+                  "-no-alias-deps";
+                ] );
+              Var.ppx, [Var.(!ppx_jsoo)];
+            ];
+      ]
   in
   let cc =
     Nj.build "c-object"
@@ -768,7 +869,7 @@ let gen_build_statements
         [
           Nj.build "phony"
             ~outputs:[modname ^ "@jsoo-module"]
-            ~inputs:[modfile ~suffix:"_jsoo" ~backend:"jsoo" ".ml" modname];
+            ~inputs:[modfile ~suffix:"_jsoo" ~backend:"jsoo" ".cmo" modname];
         ]
       else []
     | _ -> []
@@ -796,12 +897,14 @@ let gen_build_statements
     @ (if List.mem Python enabled_backends then [python] else [])
     @ (if List.mem Java enabled_backends then [java; Seq.return javac] else [])
     @ (if List.mem Tests enabled_backends then [List.to_seq tests] else [])
-    @ if List.mem Jsoo enabled_backends then [jsoo] else []
+    @
+    if List.mem Jsoo enabled_backends then [jsoo; List.to_seq jsoo_obj] else []
   in
   Seq.concat (List.to_seq statements_list)
 
 let gen_build_statements_dir
     ~is_stdlib
+    ~externls
     (dir : string)
     (include_dirs : string list)
     (enabled_backends : backend list)
@@ -839,8 +942,8 @@ let gen_build_statements_dir
   @@ Seq.cons (Nj.comment "")
   @@ Seq.cons (Nj.binding Var.tdir [!Var.builddir / dir])
   @@ Seq.flat_map
-       (gen_build_statements ~is_stdlib include_dirs enabled_backends autotest
-          same_dir_modules)
+       (gen_build_statements ~is_stdlib ~externls include_dirs enabled_backends
+          autotest same_dir_modules)
        (List.to_seq items)
 
 let dir_test_rules dir subdirs enabled_backends items =
@@ -1074,9 +1177,6 @@ let runtime_build_statements ~config enabled_backends =
            ~inputs:[ocaml_base -.- "cmx"]
            ~implicit_in:[dates_base -.- "cmi"]
            ~outputs:["@runtime-ocaml"];
-         Nj.build "copy"
-           ~inputs:[ocaml_src / "catala_runtime.mli"]
-           ~outputs:[ocaml_base -.- "mli"];
          Nj.build "ocaml-natobject"
            ~inputs:[dates_base -.- "ml"; ocaml_base -.- "ml"]
            ~implicit_in:[dates_base -.- "cmi"; ocaml_base -.- "cmi"]
@@ -1240,24 +1340,24 @@ let runtime_build_statements ~config enabled_backends =
      else [])
   @
   if List.mem Jsoo enabled_backends then
-    let ocaml_src = Var.(!runtime) / "ocaml" in
-    let dates_base = stdbase / "jsoo" / "dates_calc" in
-    let runtime_base = stdbase / "jsoo" / "catala_runtime" in
-    runtime_ocaml "jsoo" ~ocaml_src ~dates_base ~ocaml_base:runtime_base
     (* If the Jsoo backend is activated, it needs cmo files of OCaml runtime as
        js_of_ocaml only works on bytecode *)
+    let ocaml_src = Var.(!runtime) / "ocaml" in
+    let dates_base = stdbase / "jsoo" / "dates_calc" in
+    let ocaml_base = stdbase / "jsoo" / "catala_runtime" in
+    runtime_ocaml "jsoo" ~ocaml_src ~dates_base ~ocaml_base
     @ [
         Nj.build "jsoo-bytobject"
           ~inputs:[dates_base -.- "ml"]
           ~implicit_in:[dates_base -.- "cmi"]
           ~outputs:[dates_base -.- "cmo"];
         Nj.build "jsoo-bytobject"
-          ~inputs:[runtime_base -.- "ml"]
-          ~implicit_in:[dates_base -.- "cmi"; runtime_base -.- "cmi"]
-          ~outputs:[runtime_base -.- "cmo"];
+          ~inputs:[ocaml_base -.- "ml"]
+          ~implicit_in:[dates_base -.- "cmi"; ocaml_base -.- "cmi"]
+          ~outputs:[ocaml_base -.- "cmo"];
       ]
     @ runtime_jsoo ~stdbase ~dates_ocaml_base:dates_base
-        ~runtime_ocaml_base:runtime_base
+        ~runtime_ocaml_base:ocaml_base
   else []
 
 let output_ninja_file_header pp ~config ~enabled_backends ~var_bindings =
@@ -1277,13 +1377,14 @@ let output_ninja_file_item_statements
     ~enabled_backends
     ~autotest
     ~is_stdlib
+    ~externls
     item_tree
     next =
   let rec print_and_get_items seq () =
     match seq () with
     | Seq.Cons ((dir, subdirs, items), seq) ->
       Nj.format nin_ppf
-      @@ gen_build_statements_dir dir ~is_stdlib
+      @@ gen_build_statements_dir dir ~is_stdlib ~externls
            config.Clerk_cli.options.global.include_dirs enabled_backends
            autotest items;
       if not is_stdlib then
@@ -1295,6 +1396,7 @@ let output_ninja_file_item_statements
 
 let output_ninja_file
     nin_ppf
+    ~externls
     ~config
     ~enabled_backends
     ~autotest
@@ -1308,13 +1410,13 @@ let output_ninja_file
   output_ninja_file_header pp ~config ~enabled_backends ~var_bindings;
   pp (Nj.Comment "\n- Standard library build statements - #");
   Seq.memoize
-  @@ output_ninja_file_item_statements nin_ppf ~config ~enabled_backends
-       ~autotest ~is_stdlib:true stdlib_tree
+  @@ output_ninja_file_item_statements nin_ppf ~externls:[] ~config
+       ~enabled_backends ~autotest ~is_stdlib:true stdlib_tree
   @@ Seq.append (fun () ->
       pp (Nj.Comment "\n- Project-specific build statements - #");
       Seq.Nil)
-  @@ output_ninja_file_item_statements nin_ppf ~config ~enabled_backends
-       ~autotest ~is_stdlib:false project_tree
+  @@ output_ninja_file_item_statements nin_ppf ~externls ~config
+       ~enabled_backends ~autotest ~is_stdlib:false project_tree
   @@ fun () ->
   pp (Nj.Comment "\n- Global rules and defaults - #\n");
   if List.mem Tests enabled_backends then
@@ -1515,8 +1617,20 @@ let run_ninja
               in
               Some (f, fl, items))
       in
+      let externls =
+        Seq.fold_left
+          (fun acc (_, _, items) ->
+            List.rev_append acc
+              (List.filter_map
+                 (fun item ->
+                   if item.Scan.extrnal then
+                     Option.map Mark.remove item.Scan.module_def
+                   else None)
+                 items))
+          [] item_tree
+      in
       let items =
-        output_ninja_file nin_ppf ~config ~enabled_backends ~autotest
+        output_ninja_file nin_ppf ~externls ~config ~enabled_backends ~autotest
           ~var_bindings stdlib_tree item_tree
       in
       let ret = callback nin_ppf (List.of_seq items) var_bindings in
