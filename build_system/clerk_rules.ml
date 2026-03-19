@@ -1022,7 +1022,7 @@ let runtime_jsoo_statements
         [
           dates_jsoo_base -.- "cmo";
           runtime_jsoo_base -.- "cmo";
-          "@runtime-jsoo-src";
+          "@runtime-jsoo-intf";
           "@runtime-jsoo-only";
           "@original-runtime";
         ]
@@ -1100,7 +1100,7 @@ let runtime_jsoo ~stdbase ~dates_ocaml_base ~runtime_ocaml_base =
             runtime_jsoo_base -.- "ml";
             runtime_jsoo_base -.- "mli";
           ]
-        ~outputs:["@runtime-jsoo-src"];
+        ~outputs:["@runtime-jsoo-intf"];
       Nj.build "copy"
         ~inputs:[jsoo_src / "catala_runtime_jsoo.mli"]
         ~outputs:[runtime_jsoo_base -.- "mli"];
@@ -1163,7 +1163,7 @@ let runtime_ocaml backend ~ocaml_src ~dates_base ~ocaml_base =
             ocaml_base -.- "ml";
             ocaml_base -.- "mli";
           ]
-        ~outputs:["@runtime-src-" ^ backend];
+        ~outputs:["@runtime-" ^ backend ^ "-src"];
       Nj.build "copy"
         ~inputs:[ocaml_src / "catala_runtime.mli"]
         ~outputs:[ocaml_base -.- "mli"];
@@ -1468,10 +1468,9 @@ let make_binary_for_jsoo ~externls ~stdlib_tree ~project_tree module_targets =
   in
   let big_integer = _opam_dir / "zarith_stubs_js" / "biginteger.js" in
   let runtime_js = _opam_dir / "zarith_stubs_js" / "runtime.js" in
-  let jsoo_file = modfile ~ext:".exe" ("", [], "jsoo") in
-  let catala_js =
-    File.((Var.(!tdir) / String.concat "_" module_targets) ^ ".js")
-  in
+  let target_filename = String.concat "_" module_targets in
+  let jsoo_file = modfile ~ext:".exe" ("", [], target_filename) in
+  let catala_js = File.(Var.(!tdir) / (target_filename ^ ".js")) in
   [
     Nj.Comment "\n- OCaml compilation binary for JSOO - #\n";
     Nj.comment "";
