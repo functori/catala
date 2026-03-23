@@ -633,17 +633,22 @@ let export_code_items ppml ppi modname exports =
          | `value (v, t) ->
            Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.prop@]"
              format_method_var v format_typ t
-         | `meth (v, lt, te) ->
-           Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.meth@]"
-             format_method_var v format_typ
-             (Mark.ghost (TArrow (lt, te)))
+         | `meth (v, lt, te) -> begin
+           match lt with
+           | [(TLit TUnit, _)] ->
+             Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.meth@]"
+               format_method_var v format_typ te
+           | _ ->
+             Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.meth@]"
+               format_method_var v format_typ
+               (Mark.ghost (TArrow (lt, te)))
+         end
          | `scope (v, i, o) ->
            Format.fprintf fmt
              "@[<hov 2>method %a :@ %a.jsoo -> %a.jsoo Js.meth@]"
              format_method_var v format_to_module_name (`Sname i)
              format_to_module_name (`Sname o)))
     exports;
-
   Format.fprintf ppml
     "@[<hv 2>let default : default = object%%js@;\
      <1 0>%a@;\
@@ -657,22 +662,28 @@ let export_code_items ppml ppi modname exports =
          | `value (v, _) ->
            Format.fprintf fmt "@[<hov 2>val mutable %a =@ %a_jsoo@]"
              format_method_var v To_ocaml.format_var v
-         | `meth (v, lt, _) ->
-           let ip, ie = ref (-1), ref (-1) in
-           Format.fprintf fmt "@[<hov 2>method %a %a =@ %a_jsoo %a@]"
-             format_method_var v
-             (Format.pp_print_list
-                ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ ")
-                (fun fmt _ ->
-                  incr ip;
-                  Format.fprintf fmt "x%d" !ip))
-             lt To_ocaml.format_var v
-             (Format.pp_print_list
-                ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ ")
-                (fun fmt _ ->
-                  incr ie;
-                  Format.fprintf fmt "x%d" !ie))
-             lt
+         | `meth (v, lt, _) -> begin
+           match lt with
+           | [(TLit TUnit, _)] ->
+             Format.fprintf fmt "@[<hov 2>method %a =@ %a_jsoo ()@]"
+               format_method_var v To_ocaml.format_var v
+           | _ ->
+             let ip, ie = ref (-1), ref (-1) in
+             Format.fprintf fmt "@[<hov 2>method %a %a =@ %a_jsoo %a@]"
+               format_method_var v
+               (Format.pp_print_list
+                  ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ ")
+                  (fun fmt _ ->
+                    incr ip;
+                    Format.fprintf fmt "x%d" !ip))
+               lt To_ocaml.format_var v
+               (Format.pp_print_list
+                  ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ ")
+                  (fun fmt _ ->
+                    incr ie;
+                    Format.fprintf fmt "x%d" !ie))
+               lt
+         end
          | `scope (v, _, _) ->
            Format.fprintf fmt "@[<hov 2>method %a x =@ %a_jsoo x@]"
              format_method_var v To_ocaml.format_var v))

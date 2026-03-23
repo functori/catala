@@ -44,6 +44,11 @@ let format_code_items
               To_ocaml.format_typ typ;
             let rec aux bctx typ =
               match Mark.remove typ with
+              | TArrow ([(TLit TUnit, _)], te) ->
+                Format.fprintf ppml
+                  "@,@[<v 2>@[<hov 2>let %a : %a =@]@ fun () -> %a(%s##%a_)@]@,"
+                  format_var var To_ocaml.format_typ typ
+                  To_jsoo_interface.format_typ_of te js_object format_var var
               | TArrow (lt, te) | TDefault (TArrow (lt, te), _) ->
                 let ip, ie = ref (-1), ref (-1) in
                 Format.fprintf ppml
