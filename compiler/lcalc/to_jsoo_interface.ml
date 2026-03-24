@@ -618,7 +618,7 @@ let format_code_items
   pp [ppml; ppi] "@]";
   List.rev acc
 
-let export_code_items ppml ppi modname exports =
+let export_code_items ppml ppi modname exports ctx =
   pp [ppml; ppi]
     "@[<hv 2>class type default_ct = object@;\
      <1 0>%a@;\
@@ -644,10 +644,15 @@ let export_code_items ppml ppi modname exports =
                (Mark.ghost (TArrow (lt, te)))
          end
          | `scope (v, i, o) ->
-           Format.fprintf fmt
-             "@[<hov 2>method %a :@ %a.jsoo -> %a.jsoo Js.meth@]"
-             format_method_var v format_to_module_name (`Sname i)
-             format_to_module_name (`Sname o)))
+           let fields = StructName.Map.find i ctx.ctx_structs in
+           if StructField.Map.is_empty fields then
+             Format.fprintf fmt "@[<hov 2>method %a :@ %a.jsoo Js.meth@]"
+               format_method_var v format_to_module_name (`Sname o)
+           else
+             Format.fprintf fmt
+               "@[<hov 2>method %a :@ %a.jsoo -> %a.jsoo Js.meth@]"
+               format_method_var v format_to_module_name (`Sname i)
+               format_to_module_name (`Sname o)))
     exports;
   Format.fprintf ppml
     "@[<hv 2>let default : default = object%%js@;\
@@ -684,9 +689,14 @@ let export_code_items ppml ppi modname exports =
                     Format.fprintf fmt "x%d" !ie))
                lt
          end
-         | `scope (v, _, _) ->
-           Format.fprintf fmt "@[<hov 2>method %a x =@ %a_jsoo x@]"
-             format_method_var v To_ocaml.format_var v))
+         | `scope (v, i, _) ->
+           let fields = StructName.Map.find i ctx.ctx_structs in
+           if StructField.Map.is_empty fields then
+             Format.fprintf fmt "@[<hov 2>method %a =@ %a_jsoo ()@]"
+               format_method_var v To_ocaml.format_var v
+           else
+             Format.fprintf fmt "@[<hov 2>method %a x =@ %a_jsoo x@]"
+               format_method_var v To_ocaml.format_var v))
     exports
     (fun fmt m ->
       match m with
@@ -724,7 +734,7 @@ let format_program
     modname;
   format_ctx ~include_:true type_ordering ppml ppi p.decl_ctx;
   let exports = format_code_items ppml ppi p.code_items in
-  export_code_items ppml ppi modname exports;
+  export_code_items ppml ppi modname exports p.decl_ctx;
   pp [ppml; ppi] "@]";
   Format.pp_print_flush ppml ();
   Format.pp_print_flush ppi ();
