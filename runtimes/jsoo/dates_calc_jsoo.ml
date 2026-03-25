@@ -7,24 +7,24 @@ class type date_jsoo_ct = object
   method day : int Js.prop
 end
 
-type date_jsoo = date_jsoo_ct Js.t
+type date_jsoo = Js.Unsafe.any
 
 let date_to_jsoo : date -> date_jsoo =
- fun d ->
-  let y, m, d = date_to_ymd d in
-  object%js
-    val mutable year = y
-    val mutable month = m
-    val mutable day = d
-  end
+ fun d -> Js.Unsafe.inject (Js.string (Format.asprintf "%a" format_date d))
 
 let date_of_jsoo : date_jsoo -> date =
- fun js -> make_date ~year:js##.year ~month:js##.month ~day:js##.day
+ fun js ->
+  match Js.to_string (Js.typeof js) with
+  | "string" -> date_of_string (Js.to_string (Js.Unsafe.coerce js))
+  | "object" ->
+    let js = Js.Unsafe.coerce js in
+    make_date ~year:js##.year ~month:js##.month ~day:js##.day
+  | s -> failwith (Format.sprintf "%S cannot be converted to date" s)
 
 class type period_jsoo_ct = object
-  method years : int Js.prop
-  method months : int Js.prop
-  method days : int Js.prop
+  method years : int Js.optdef Js.prop
+  method months : int Js.optdef Js.prop
+  method days : int Js.optdef Js.prop
 end
 
 type period_jsoo = period_jsoo_ct Js.t
@@ -33,13 +33,17 @@ let period_to_jsoo : period -> period_jsoo =
  fun p ->
   let y, m, d = period_to_ymds p in
   object%js
-    val mutable years = y
-    val mutable months = m
-    val mutable days = d
+    val mutable years = if y = 0 then Js.undefined else Js.def y
+    val mutable months = if m = 0 then Js.undefined else Js.def m
+    val mutable days = if d = 0 then Js.undefined else Js.def d
   end
 
 let period_of_jsoo : period_jsoo -> period =
- fun js -> make_period ~years:js##.years ~months:js##.months ~days:js##.days
+ fun js ->
+  let years = Option.value ~default:0 @@ Js.Optdef.to_option js##.years in
+  let months = Option.value ~default:0 @@ Js.Optdef.to_option js##.months in
+  let days = Option.value ~default:0 @@ Js.Optdef.to_option js##.days in
+  make_period ~years ~months ~days
 
 type date_rounding_jsoo = Js.js_string Js.t
 
@@ -68,7 +72,11 @@ let sub_dates_jsoo d1 d2 =
   period_to_jsoo (sub_dates (date_of_jsoo d1) (date_of_jsoo d2))
 
 let compare_dates_jsoo d1 d2 = compare_dates (date_of_jsoo d1) (date_of_jsoo d2)
-let date_to_ymd_jsoo d = Js.array [| d##.year; d##.month; d##.day |]
+
+let date_to_ymd_jsoo d =
+  let d = date_of_jsoo d in
+  let y, m, d = date_to_ymd d in
+  Js.array [| y; m; d |]
 
 let date_to_string_jsoo js =
   Js.string (Format.asprintf "%a" format_date (date_of_jsoo js))
@@ -99,7 +107,12 @@ let period_to_string_jsoo js =
   Js.string (Format.asprintf "%a" format_period (period_of_jsoo js))
 
 let period_to_days_jsoo p = period_to_days (period_of_jsoo p)
-let period_to_ymds_jsoo p = Js.array [| p##.years; p##.months; p##.days |]
+
+let period_to_ymds_jsoo p =
+  let years = Option.value ~default:0 @@ Js.Optdef.to_option p##.years in
+  let months = Option.value ~default:0 @@ Js.Optdef.to_option p##.months in
+  let days = Option.value ~default:0 @@ Js.Optdef.to_option p##.days in
+  Js.array [| years; months; days |]
 
 class type default_ct = object
   method make_date_ : int -> int -> int -> date_jsoo Js.meth

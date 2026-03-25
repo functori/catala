@@ -7,15 +7,15 @@ class type date_jsoo_ct = object
   method day : int Js.prop
 end
 
-type date_jsoo = date_jsoo_ct Js.t
+type date_jsoo = Js.Unsafe.any
 
 val date_to_jsoo : date -> date_jsoo
 val date_of_jsoo : date_jsoo -> date
 
 class type period_jsoo_ct = object
-  method years : int Js.prop
-  method months : int Js.prop
-  method days : int Js.prop
+  method years : int Js.optdef Js.prop
+  method months : int Js.optdef Js.prop
+  method days : int Js.optdef Js.prop
 end
 
 type period_jsoo = period_jsoo_ct Js.t

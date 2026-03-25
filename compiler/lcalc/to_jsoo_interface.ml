@@ -316,12 +316,19 @@ let format_ctx
   let format_enum_decl (enum_name, enum_cons) =
     if TypeIdent.(Set.mem (Enum enum_name) ctx.ctx_public_types) then
       let variants = EnumConstructor.Map.bindings enum_cons in
-      let string_enum =
-        EnumConstructor.Map.for_all
+      let empty_cons_variants, content_cons_variants =
+        EnumConstructor.Map.partition
           (fun _ -> (function TLit TUnit, _ -> true | _ -> false))
           enum_cons
       in
-      if string_enum then (
+      let empty_cons_variants =
+        EnumConstructor.Map.bindings empty_cons_variants
+      in
+      let content_cons_variants =
+        EnumConstructor.Map.bindings content_cons_variants
+      in
+      match content_cons_variants with
+      | [] ->
         Format.fprintf ppi
           "@[<hv 2>module %a : sig@ @[<hv 2>type t = %a.t @]@,\
            type jsoo = Js.js_string Js.t@,\
@@ -357,8 +364,8 @@ let format_ctx
                Format.fprintf fmt "@[<hov 2>\"%a\" -> %a@]"
                  To_ocaml.format_enum_cons_name enum_cons
                  To_ocaml.format_enum_cons_name enum_cons))
-          variants)
-      else (
+          variants
+      | _ -> (
         Format.fprintf ppi
           "@[<hv 2>module %a : sig@ @[<hv 2>type t = %a.t@]@,\
            @[<hv 2>class type jsoo_ct = object@;\
@@ -377,80 +384,144 @@ let format_ctx
                Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.optdef Js.prop@]"
                  format_enum_cons_name enum_cons format_typ enum_cons_type))
           variants;
-        Format.fprintf ppml
-          "@[<hv 2>module %a = struct@ @[<hv 2>open %a @]@,\
-           @[<hv 2>type nonrec t = t@,\
-           @[<hv 2>class type jsoo_ct = object@;\
-           <1 0>%a@;\
-           <1 -2>end@]@,\
-           type jsoo = jsoo_ct Js.t@,\
-           @[<hv 2>let to_jsoo x = match x with %a%a%a@]@,\
-           @[<hv 2>let of_jsoo js = match %a with@;\
-           %a%a%a@,\
-           @ |@[<hov> _ -> invalid_arg \"unknown case\"@]@]@;\
-           <1 -2>end@]@,\
-           @,"
-          To_ocaml.format_to_module_name (`Ename enum_name)
-          To_ocaml.format_to_module_name (`Ename enum_name)
-          (Format.pp_print_list
-             ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
-             (fun fmt (enum_cons, enum_cons_type) ->
-               Format.fprintf fmt "@[<hov 2>method %a :@ %a Js.optdef Js.prop@]"
-                 format_enum_cons_name enum_cons format_typ enum_cons_type))
-          variants Format.pp_print_if_newline () Format.pp_print_string "| "
-          (Format.pp_print_list
-             ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
-             (fun fmt (enum_cons, enum_cons_type) ->
-               let no_content =
-                 match enum_cons_type with TLit TUnit, _ -> true | _ -> false
-               in
-               Format.fprintf fmt
-                 "@[<hov 2>%a%a -> object%%js@;<1 0>%a@;<1 -2>end@]@,"
-                 To_ocaml.format_enum_cons_name enum_cons
-                 (fun fmt b -> if not b then Format.fprintf fmt "@ x")
-                 no_content
-                 (Format.pp_print_list
-                    ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
-                    (fun fmt (enum_cons2, _) ->
-                      if enum_cons <> enum_cons2 then
-                        Format.fprintf fmt
-                          "@[<hov 2>val mutable %a =@ Js.undefined@]@,"
-                          format_enum_cons_name enum_cons2
-                      else
-                        Format.fprintf fmt
-                          "@[<hov 2>val mutable %a =@ Js.def (%a@ %a)@]@,"
-                          format_enum_cons_name enum_cons format_typ_to
-                          enum_cons_type
-                          (fun fmt b ->
-                            if not b then Format.fprintf fmt "x"
-                            else Format.fprintf fmt "()")
-                          no_content))
-                 variants))
-          variants
-          (Format.pp_print_list
-             ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
-             (fun fmt (enum_cons, _) ->
-               Format.fprintf fmt "@[<hov 2>Js.Optdef.to_option (js##.%a)@]"
-                 format_enum_cons_name enum_cons))
-          variants Format.pp_print_if_newline () Format.pp_print_string "| "
-          (Format.pp_print_list
-             ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
-             (fun fmt (enum_cons, enum_cons_type) ->
-               let no_content =
-                 match enum_cons_type with TLit TUnit, _ -> true | _ -> false
-               in
-               Format.fprintf fmt "@[<hov 2>%a -> %a%a@]@,"
-                 (Format.pp_print_list
-                    ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
-                    (fun fmt (enum_cons2, _) ->
-                      if enum_cons <> enum_cons2 then Format.fprintf fmt "_"
-                      else Format.fprintf fmt "Some _c"))
-                 variants To_ocaml.format_enum_cons_name enum_cons
-                 (fun fmt b ->
-                   if not b then
-                     Format.fprintf fmt "@ (%a _c)" format_typ_of enum_cons_type)
-                 no_content))
-          variants)
+        match empty_cons_variants with
+        | [] ->
+          Format.fprintf ppml
+            "@[<hv 2>module %a = struct@ @[<hv 2>open %a @]@,\
+             @[<hv 2>type nonrec t = t@,\
+             @[<hv 2>class type jsoo_ct = object@;\
+             <1 0>%a@;\
+             <1 -2>end@]@,\
+             type jsoo = jsoo_ct Js.t@,\
+             @[<hv 2>let to_jsoo x = match x with %a%a%a@]@,\
+             @[<hv 2>let of_jsoo js = match %a with@;\
+             %a%a%a@,\
+             @ |@[<hov> _ -> invalid_arg \"unknown case\"@]@]@;\
+             <1 -2>end@]@,\
+             @,"
+            To_ocaml.format_to_module_name (`Ename enum_name)
+            To_ocaml.format_to_module_name (`Ename enum_name)
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 Format.fprintf fmt
+                   "@[<hov 2>method %a :@ %a Js.optdef Js.prop@]"
+                   format_enum_cons_name enum_cons format_typ enum_cons_type))
+            variants Format.pp_print_if_newline () Format.pp_print_string "| "
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 Format.fprintf fmt
+                   "@[<hov 2>%a x -> object%%js@;<1 0>%a@;<1 -2>end@]@,"
+                   To_ocaml.format_enum_cons_name enum_cons
+                   (Format.pp_print_list
+                      ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
+                      (fun fmt (enum_cons2, _) ->
+                        if enum_cons <> enum_cons2 then
+                          Format.fprintf fmt
+                            "@[<hov 2>val mutable %a =@ Js.undefined@]@,"
+                            format_enum_cons_name enum_cons2
+                        else
+                          Format.fprintf fmt
+                            "@[<hov 2>val mutable %a =@ Js.def (%a@ x)@]@,"
+                            format_enum_cons_name enum_cons format_typ_to
+                            enum_cons_type))
+                   variants))
+            variants
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
+               (fun fmt (enum_cons, _) ->
+                 Format.fprintf fmt "@[<hov 2>Js.Optdef.to_option (js##.%a)@]"
+                   format_enum_cons_name enum_cons))
+            variants Format.pp_print_if_newline () Format.pp_print_string "| "
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 Format.fprintf fmt "@[<hov 2>%a -> %a@ (%a _c)@]@,"
+                   (Format.pp_print_list
+                      ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
+                      (fun fmt (enum_cons2, _) ->
+                        if enum_cons <> enum_cons2 then Format.fprintf fmt "_"
+                        else Format.fprintf fmt "Some _c"))
+                   variants To_ocaml.format_enum_cons_name enum_cons
+                   format_typ_of enum_cons_type))
+            variants
+        | _ ->
+          Format.fprintf ppml
+            "@[<hv 2>module %a = struct@ @[<hv 2>open %a @]@,\
+             type nonrec t = t@,\
+             @[<hv 2>class type jsoo_ct = object@;\
+             <1 0>%a@;\
+             <1 -2>end@]@,\
+             type jsoo = jsoo_ct Js.t@,\
+             @[<hv 2>let to_jsoo x = match x with %a%a%a@]@,\
+             @[<hv 2>let of_jsoo js =@;\
+             @[<hv 2>if Js.to_string (Js.typeof js) = \"string\" then@;\
+             <1 0>@[<hv 2>match Js.to_string (Js.Unsafe.coerce js) with@;\
+             <1 0>| %a@;\
+             <1 0>| s -> invalid_arg (\"unknown case: \" ^ s)@]@;\
+             <1 -2>else@;\
+             <1 0>@[<hv 2>match %a with@;\
+             <1 0>| %a@;\
+             <1 0> | _ -> invalid_arg \"unknown case\"@]@]@;\
+             <1 -2>end@]@,\
+             @,"
+            To_ocaml.format_to_module_name (`Ename enum_name)
+            To_ocaml.format_to_module_name (`Ename enum_name)
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 Format.fprintf fmt
+                   "@[<hov 2>method %a :@ %a Js.optdef Js.prop@]"
+                   format_enum_cons_name enum_cons format_typ enum_cons_type))
+            variants Format.pp_print_if_newline () Format.pp_print_string "| "
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 let no_content =
+                   match enum_cons_type with
+                   | TLit TUnit, _ -> true
+                   | _ -> false
+                 in
+                 if no_content then
+                   Format.fprintf fmt
+                     "@[<hov 2>%a -> Js.Unsafe.coerce (Js.string \"%a\")@]@,"
+                     To_ocaml.format_enum_cons_name enum_cons
+                     To_ocaml.format_enum_cons_name enum_cons
+                 else
+                   Format.fprintf fmt
+                     "@[<hov 2>%a@ x -> Js.Unsafe.coerce (object%%js@;\
+                      <1 0>val mutable %a =@ Js.def (%a@ x)@;\
+                      <1 -2>end)@]@,"
+                     To_ocaml.format_enum_cons_name enum_cons
+                     format_enum_cons_name enum_cons format_typ_to
+                     enum_cons_type))
+            variants
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
+               (fun fmt (enum_cons, _) ->
+                 Format.fprintf fmt "\"%a\" -> %a"
+                   To_ocaml.format_enum_cons_name enum_cons
+                   To_ocaml.format_enum_cons_name enum_cons))
+            empty_cons_variants
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
+               (fun fmt (enum_cons, _) ->
+                 Format.fprintf fmt "Js.Optdef.to_option (js##.%a)"
+                   format_enum_cons_name enum_cons))
+            content_cons_variants
+            (Format.pp_print_list
+               ~pp_sep:(fun fmt () -> Format.fprintf fmt "@ | ")
+               (fun fmt (enum_cons, enum_cons_type) ->
+                 Format.fprintf fmt "@[<hov 2>%a -> %a@ (%a _c)@]@,"
+                   (Format.pp_print_list
+                      ~pp_sep:(fun fmt () -> Format.fprintf fmt ",@ ")
+                      (fun fmt (enum_cons2, _) ->
+                        if enum_cons <> enum_cons2 then Format.fprintf fmt "_"
+                        else Format.fprintf fmt "Some _c"))
+                   content_cons_variants To_ocaml.format_enum_cons_name
+                   enum_cons format_typ_of enum_cons_type))
+            content_cons_variants)
   in
   let is_in_type_ordering s =
     List.exists
