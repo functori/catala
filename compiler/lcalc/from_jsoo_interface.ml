@@ -38,8 +38,6 @@ let format_code_items
         match item with
         | Topdef (_name, typ, vis, _e) ->
           if vis = Public then (
-            (* J'imagine que ca en js ca doit pouvoir se transposer en
-               property*)
             Format.fprintf ppi "@,@[<hov 2>val %a : %a@]@," format_var var
               To_ocaml.format_typ typ;
             let rec aux bctx typ =
@@ -74,7 +72,6 @@ let format_code_items
             in
             aux Bindlib.empty_ctxt typ)
         | ScopeDef (_name, body) ->
-          (* Ca c'est quand tu déclares un champ d'application *)
           if body.scope_body_visibility = Public then (
             let scope_input_var, _scope_body_expr =
               Bindlib.unbind body.scope_body_expr
@@ -106,27 +103,6 @@ let format_code_items
   in
   ();
   pp [ppml; ppi] "@]"
-
-let export_code_items ppml modname exports =
-  Format.fprintf ppml "@[<hv 2>let () = %a (object%%js@;<1 0>%a@;<1 -2>end)@]"
-    (fun fmt m ->
-      match m with
-      | None -> Format.fprintf fmt "Js.export_all"
-      | Some m -> Format.fprintf fmt "Js.export \"%s\"" m)
-    modname
-    (Format.pp_print_list
-       ~pp_sep:(fun fmt () -> Format.fprintf fmt "@,")
-       (fun fmt e ->
-         match e with
-         | `top v ->
-           Format.fprintf fmt "@[<hov 2>val %s =@ %s_jsoo@]"
-             (To_jsoo_interface.method_name v)
-             v
-         | `scope f ->
-           Format.fprintf fmt "@[<hov 2>method %s x =@ %s_jsoo x@]"
-             (To_jsoo_interface.method_name f)
-             f))
-    exports
 
 let format_module_registration fmt modname hash is_external =
   Format.pp_open_vbox fmt 2;
