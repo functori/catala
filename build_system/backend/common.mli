@@ -26,8 +26,6 @@ module Flags : sig
     code_coverage:bool -> config:Clerk_cli.config -> (Var.t * string list) list
 end
 
-module Rules : sig
-  module Nj = Ninja_utils
-
-  val common : Nj.def list
+module Ninja : sig
+  val static_base_rules : Ninja_utils.def list
 end

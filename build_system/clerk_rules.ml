@@ -138,7 +138,7 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
 
 let[@ocamlformat "disable"] static_base_rules enabled_backends =
   let open Var in
-  Backend_common.Rules.common @
+  Backend_common.Ninja.static_base_rules @
   (if List.mem OCaml enabled_backends then
          let runtime_include =
            File.(Var.(!builddir) / Scan.libcatala / "ocaml")
