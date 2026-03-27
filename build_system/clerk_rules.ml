@@ -1170,7 +1170,18 @@ let run_ninja
         Scan.tree stdlib_dir |> Seq.map (fun (f, fl, items) -> f, fl, items)
       in
       let item_tree =
-        Scan.tree "."
+        List.fold_left
+          (fun acc dir ->
+            let tree = Scan.tree dir in
+            Seq.append acc tree)
+          Seq.empty config.options.global.include_dirs
+      in
+      if Seq.is_empty item_tree then
+        Message.warning
+          "Did not find any catala files, did you setup specify the included \
+           dirs in your clerk.toml";
+      let item_tree =
+        item_tree
         |> Seq.filter_map (fun (f, fl, items) ->
             if insource && String.starts_with f ~prefix:"stdlib" then None
             else
