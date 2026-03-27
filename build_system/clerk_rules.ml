@@ -17,7 +17,7 @@
 
 open Catala_utils
 open Clerk_utils
-open Clerk_backends
+module Backend_common = Clerk_backends.Common
 module Nj = Ninja_utils
 
 (**{1 Building rules}*)
@@ -37,8 +37,8 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in
   let test_flags = config.Clerk_cli.test_flags in
   let use_default_flags = test_flags = [] && options.global.catala_opts = [] in
-  let def = Flags.def ~variables:options.variables in
-  let default_flags = Flags.default ~code_coverage ~config in
+  let def = Backend_common.Flags.def ~variables:options.variables in
+  let default_flags = Backend_common.Flags.default ~code_coverage ~config in
   default_flags
   @ (if List.mem OCaml enabled_backends then
        let catala_flags_ocaml =
@@ -60,7 +60,7 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
          def Var.ocaml_include
            (lazy
              (Lazy.force Clerk_poll.ocaml_include_flags
-             @ Flags.includes ~backend:(Some "ocaml")
+             @ Backend_common.Flags.includes ~backend:(Some "ocaml")
                  options.global.include_dirs));
        ]
      else [])
@@ -131,7 +131,8 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
       def Var.c_include
         (lazy
           (["-I"; File.(Var.(!builddir) / Scan.libcatala / "c")]
-          @ Flags.includes ~backend:(Some "c") options.global.include_dirs));
+          @ Backend_common.Flags.includes ~backend:(Some "c")
+              options.global.include_dirs));
     ]
   else []
 

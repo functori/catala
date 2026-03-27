@@ -16,11 +16,12 @@
    the License. *)
 
 open Clerk_utils
-open Catala_utils
 open Clerk_lib
 
-val def : variables:(string * 'a) list -> Var.t -> 'a lazy_t -> Var.t * 'a
-val includes : backend:string option -> string list -> string list
+module Flags : sig
+  val def : variables:(string * 'a) list -> Var.t -> 'a lazy_t -> Var.t * 'a
+  val includes : backend:string option -> string list -> string list
 
-val default :
-  code_coverage:bool -> config:Clerk_cli.config -> (Var.t * string list) list
+  val default :
+    code_coverage:bool -> config:Clerk_cli.config -> (Var.t * string list) list
+end
