@@ -32,4 +32,5 @@ end
 
 module Ninja : sig
   val static_base_rules : Ninja_utils.def list
+  val runtime_build_statements : stdbase:string -> Ninja_utils.def list
 end
