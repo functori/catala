@@ -1310,10 +1310,14 @@ module Commands = struct
       match output_file, options.Global.input_src with
       | Some file, _
       | None, (FileName (file : File.t) | Contents (_, (file : File.t))) ->
-        let name = File.remove_extension file |> Filename.basename in
-        if Global.options.gen_external then
-          String.capitalize_ascii (File.remove_extension name)
-        else name
+        let raw_name = File.remove_extension (Filename.basename file) in
+        let name =
+          if Global.options.gen_external then String.capitalize_ascii raw_name
+          else raw_name
+        in
+        Option.fold ~none:name
+          ~some:(fun mname -> ModuleName.to_string (Mark.remove mname))
+          prg.module_name
       | None, Stdin _ -> "AnonymousClass"
     in
     Scalc.To_java.format_program ~class_name output_file ppf prg
