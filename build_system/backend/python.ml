@@ -93,7 +93,7 @@ module Backend = struct
 
   let build_object ~include_dirs:_ ~same_dir_modules:_ ~item:_ _has_scope_tests
       =
-    []
+    Seq.empty
 
   let runtime_dir : File.t Lazy.t =
     lazy File.(Lazy.force Poll.runtime_dir / "python" / "src" / "catala")

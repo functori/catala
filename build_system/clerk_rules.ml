@@ -47,63 +47,80 @@ let module_extension = function
   | Java -> ".class"
   | Tests -> ""
 
+let backend_flags = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.Flags.default
+  | C -> Clerk_backends.C.Backend.Flags.default
+  | Python -> Clerk_backends.Python.Backend.Flags.default
+  | Java -> Clerk_backends.Java.Backend.Flags.default
+  | Tests ->
+    fun ~variables:_ ~autotest:_ ~use_default_flags:_ ~test_flags:_
+        ~include_dirs:_ -> []
+
+let static_base_rules = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.static_base_rules
+  | C -> Clerk_backends.C.Backend.static_base_rules
+  | Python -> Clerk_backends.Python.Backend.static_base_rules
+  | Java -> Clerk_backends.Java.Backend.static_base_rules
+  | Tests ->
+    let open Var in
+    [
+      Nj.rule "tests"
+        ~command:
+          [!clerk_exe; "runtest"; !clerk_flags; !input; "--report"; !output]
+        ~description:["<catala>"; "tests"; "⇐"; !input];
+      Nj.rule "dir-tests"
+        ~command:
+          (if Sys.win32 then ["cmd"; "/c"; "copy /by >nul"; !cat_files; !output]
+           else ["cat"; !input; ">"; !output])
+        ~description:["<test>"; !test_id];
+    ]
+
+let external_copy = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.external_copy
+  | C -> Clerk_backends.C.Backend.external_copy
+  | Python -> Clerk_backends.Python.Backend.external_copy
+  | Java -> Clerk_backends.Java.Backend.external_copy
+  | Tests -> fun _ -> Seq.empty
+
+let catala = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.catala
+  | C -> Clerk_backends.C.Backend.catala
+  | Python -> Clerk_backends.Python.Backend.catala
+  | Java -> Clerk_backends.Java.Backend.catala
+  | Tests -> fun ?vars:_ ~inputs:_ ~implicit_in:_ _ -> Seq.empty
+
+let build_object = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.build_object
+  | C -> Clerk_backends.C.Backend.build_object
+  | Python -> Clerk_backends.Python.Backend.build_object
+  | Java -> Clerk_backends.Java.Backend.build_object
+  | Tests -> fun ~include_dirs:_ ~same_dir_modules:_ ~item:_ _ -> Seq.empty
+
+let runtime_build_statements = function
+  | OCaml -> Clerk_backends.Ocaml.Backend.runtime_build_statements
+  | C -> Clerk_backends.C.Backend.runtime_build_statements
+  | Python -> Clerk_backends.Python.Backend.runtime_build_statements
+  | Java -> Clerk_backends.Java.Backend.runtime_build_statements
+  | Tests -> fun ~options:_ ~stdbase:_ -> []
+
 let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in
   let test_flags = config.Clerk_cli.test_flags in
   let use_default_flags = test_flags = [] && options.global.catala_opts = [] in
   let default_flags = Backend_common.Flags.default ~code_coverage ~config in
-  default_flags
-  @ (if List.mem OCaml enabled_backends then
-       Clerk_backends.Ocaml.Backend.Flags.default ~variables:options.variables
-         ~autotest ~use_default_flags ~test_flags
-         ~include_dirs:options.global.include_dirs
-     else [])
-  @ (if List.mem Python enabled_backends then
-       Clerk_backends.Python.Backend.Flags.default ~variables:options.variables
-         ~autotest ~use_default_flags ~test_flags
-         ~include_dirs:options.global.include_dirs
-     else [])
-  @ (if List.mem Java enabled_backends then
-       Clerk_backends.Java.Backend.Flags.default ~variables:options.variables
-         ~autotest ~use_default_flags ~test_flags
-         ~include_dirs:options.global.include_dirs
-     else [])
-  @
-  if List.mem C enabled_backends then
-    Clerk_backends.C.Backend.Flags.default ~variables:options.variables
-      ~autotest ~use_default_flags ~test_flags
-      ~include_dirs:options.global.include_dirs
-  else []
+  let backend_flags =
+    List.concat_map
+      (backend_flags ~variables:options.variables ~autotest ~use_default_flags
+         ~test_flags ~include_dirs:options.global.include_dirs)
+      enabled_backends
+  in
+  default_flags @ backend_flags
 
-let[@ocamlformat "disable"] static_base_rules enabled_backends =
-  let open Var in
-  Backend_common.Ninja.static_base_rules @
-  (if List.mem OCaml enabled_backends then
-       Clerk_backends.Ocaml.Backend.static_base_rules else []) @
-  (if List.mem C enabled_backends then
-    Clerk_backends.C.Backend.static_base_rules
-   else []) @
-  (if List.mem Python enabled_backends then
-    Clerk_backends.Python.Backend.static_base_rules else []) @
-  (if List.mem Java enabled_backends then
-    Clerk_backends.Java.Backend.static_base_rules else []) @
-  (if List.mem Tests enabled_backends then
-     [Nj.rule "tests"
-        ~command:
-          [!clerk_exe; "runtest"; !clerk_flags; !input;
-           "--report"; !output;]
-        ~description:["<catala>"; "tests"; "⇐"; !input];
-
-      Nj.rule "dir-tests"
-        ~command:
-        (if Sys.win32 then
-          ["cmd"; "/c"; "copy /by >nul"; !cat_files; !output]
-        else
-          ["cat"; !input; ">"; !output]
-        )
-        ~description:["<test>"; !test_id];
-     ]
-   else [])
+let static_base_rules enabled_backends =
+  let backend_static_rules =
+    List.concat_map static_base_rules enabled_backends
+  in
+  Backend_common.Ninja.static_base_rules @ backend_static_rules
 
 let gen_build_statements
     (include_dirs : string list)
@@ -174,25 +191,9 @@ let gen_build_statements
       else []
   in
   let has_scope_tests = Lazy.force item.has_scope_tests in
-  let ocaml, c, python, java =
+  let backend_sources =
     if item.extrnal then
-      let ocaml =
-        if not (List.mem OCaml enabled_backends) then Seq.empty
-        else Clerk_backends.Ocaml.Backend.external_copy item
-      in
-      let c =
-        if not (List.mem C enabled_backends) then Seq.empty
-        else Clerk_backends.C.Backend.external_copy item
-      in
-      let python =
-        if not (List.mem Python enabled_backends) then Seq.empty
-        else Clerk_backends.Python.Backend.external_copy item
-      in
-      let java =
-        if not (List.mem Java enabled_backends) then Seq.empty
-        else Clerk_backends.Java.Backend.external_copy item
-      in
-      ocaml, c, python, java
+      List.map (fun backend -> external_copy backend item) enabled_backends
     else
       let inputs = [catala_src] in
       let implicit_in =
@@ -206,26 +207,17 @@ let gen_build_statements
           Some [Var.catala_flags, [Var.(!catala_flags); "--no-stdlib"]]
         else None
       in
-      ( Clerk_backends.Ocaml.Backend.catala ?vars ~inputs ~implicit_in
-          has_scope_tests,
-        Clerk_backends.C.Backend.catala ?vars ~inputs ~implicit_in
-          has_scope_tests,
-        Clerk_backends.Python.Backend.catala ?vars ~inputs ~implicit_in
-          has_scope_tests,
-        Clerk_backends.Java.Backend.catala ?vars ~inputs ~implicit_in
-          has_scope_tests )
+      List.map
+        (fun backend ->
+          catala ?vars ~inputs ~implicit_in backend has_scope_tests)
+        enabled_backends
   in
-  let ocamlopt =
-    Clerk_backends.Ocaml.Backend.build_object ~include_dirs ~same_dir_modules
-      ~item has_scope_tests
-  in
-  let cc =
-    Clerk_backends.C.Backend.build_object ~include_dirs ~same_dir_modules ~item
-      has_scope_tests
-  in
-  let javac =
-    Clerk_backends.Java.Backend.build_object ~include_dirs ~same_dir_modules
-      ~item has_scope_tests
+  let backend_objects =
+    List.map
+      (fun backend ->
+        build_object ~include_dirs ~same_dir_modules ~item backend
+          has_scope_tests)
+      enabled_backends
   in
   let expose_module =
     (* Note: these rules define global (top-level) aliases for module targets of
@@ -275,21 +267,20 @@ let gen_build_statements
           ~outputs:[catala_src ^ "@test"; catala_src ^ "@out"];
       ]
   in
-  let statements_list =
-    Seq.return (Nj.comment "")
-    :: List.to_seq def_vars
-    :: Seq.return include_deps
-    :: List.to_seq expose_module
-    :: List.to_seq module_deps
-    ::
-    (if List.mem OCaml enabled_backends then [ocaml; List.to_seq ocamlopt]
-     else [])
-    @ (if List.mem C enabled_backends then [c; List.to_seq cc] else [])
-    @ (if List.mem Python enabled_backends then [python] else [])
-    @ (if List.mem Java enabled_backends then [java; List.to_seq javac] else [])
-    @ if List.mem Tests enabled_backends then [List.to_seq tests] else []
+  let statements_backend =
+    List.map2 Seq.append backend_sources backend_objects
   in
-  Seq.concat (List.to_seq statements_list)
+  let statements_list =
+    [
+      Seq.return (Nj.comment "");
+      List.to_seq def_vars;
+      Seq.return include_deps;
+      List.to_seq expose_module;
+      List.to_seq module_deps;
+      List.to_seq tests;
+    ]
+  in
+  Seq.concat (List.to_seq (statements_list @ statements_backend))
 
 let gen_build_statements_dir
     ~is_stdlib
@@ -376,19 +367,7 @@ let runtime_build_statements ~config enabled_backends =
   let open File in
   let stdbase = Var.(!builddir) / Scan.libcatala in
   let options = config.Clerk_lib.Clerk_cli.options in
-  (if List.mem OCaml enabled_backends then
-     Clerk_backends.Ocaml.Backend.runtime_build_statements ~options ~stdbase
-   else [])
-  @ (if List.mem C enabled_backends then
-       Clerk_backends.C.Backend.runtime_build_statements ~options ~stdbase
-     else [])
-  @ (if List.mem Python enabled_backends then
-       Clerk_backends.Python.Backend.runtime_build_statements ~options ~stdbase
-     else [])
-  @
-  if List.mem Java enabled_backends then
-    Clerk_backends.Java.Backend.runtime_build_statements ~options ~stdbase
-  else []
+  List.concat_map (runtime_build_statements ~options ~stdbase) enabled_backends
 
 let output_ninja_file_header pp ~config ~enabled_backends ~var_bindings =
   pp
