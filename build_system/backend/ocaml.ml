@@ -17,6 +17,7 @@
 
 open Clerk_utils
 open Catala_utils
+open Var
 
 module Flags = struct
   let ocaml_include_and_lib : (string list * string list) Lazy.t =
@@ -75,9 +76,9 @@ module Flags = struct
     ]
 end
 
+module Nj = Ninja_utils
+
 module Backend = struct
-  open Var
-  module Nj = Ninja_utils
   module Flags = Flags
 
   let[@ocamlformat "disable"] static_base_rules =
@@ -286,4 +287,35 @@ module Backend = struct
       else []
     in
     List.to_seq obj
+end
+
+module Tests = struct
+  let static_base_rules =
+    [
+      Nj.rule "tests"
+        ~command:
+          [!clerk_exe; "runtest"; !clerk_flags; !input; "--report"; !output]
+        ~description:["<catala>"; "tests"; "⇐"; !input];
+      Nj.rule "dir-tests"
+        ~command:
+          (if Sys.win32 then ["cmd"; "/c"; "copy /by >nul"; !cat_files; !output]
+           else ["cat"; !input; ">"; !output])
+        ~description:["<test>"; !test_id];
+    ]
+
+  let build_test ~same_dir_modules ~item =
+    let open File in
+    let modules = List.rev_map Mark.remove item.Scan.used_modules in
+    let catala_src = !Var.tdir / !Var.src in
+    if not (item.has_inline_tests || Lazy.force item.has_scope_tests) then
+      Seq.empty
+    else
+      List.to_seq
+        [
+          Nj.build "tests" ~inputs:[catala_src]
+            ~implicit_in:
+              (!Var.clerk_exe
+              :: List.map (Backend.module_target same_dir_modules) modules)
+            ~outputs:[catala_src ^ "@test"; catala_src ^ "@out"];
+        ]
 end

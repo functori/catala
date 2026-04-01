@@ -21,3 +21,12 @@ module Flags : sig
 end
 
 module Backend : Backend.S
+
+module Tests : sig
+  val static_base_rules : Ninja_utils.def list
+
+  val build_test :
+    same_dir_modules:(string * string) list ->
+    item:Clerk_utils.Scan.item ->
+    Ninja_utils.def Seq.t
+end

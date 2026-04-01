@@ -61,19 +61,7 @@ let static_base_rules = function
   | C -> Clerk_backends.C.Backend.static_base_rules
   | Python -> Clerk_backends.Python.Backend.static_base_rules
   | Java -> Clerk_backends.Java.Backend.static_base_rules
-  | Tests ->
-    let open Var in
-    [
-      Nj.rule "tests"
-        ~command:
-          [!clerk_exe; "runtest"; !clerk_flags; !input; "--report"; !output]
-        ~description:["<catala>"; "tests"; "⇐"; !input];
-      Nj.rule "dir-tests"
-        ~command:
-          (if Sys.win32 then ["cmd"; "/c"; "copy /by >nul"; !cat_files; !output]
-           else ["cat"; !input; ">"; !output])
-        ~description:["<test>"; !test_id];
-    ]
+  | Tests -> Clerk_backends.Ocaml.Tests.static_base_rules
 
 let external_copy = function
   | OCaml -> Clerk_backends.Ocaml.Backend.external_copy
@@ -94,7 +82,9 @@ let build_object = function
   | C -> Clerk_backends.C.Backend.build_object
   | Python -> Clerk_backends.Python.Backend.build_object
   | Java -> Clerk_backends.Java.Backend.build_object
-  | Tests -> fun ~include_dirs:_ ~same_dir_modules:_ ~item:_ _ -> Seq.empty
+  | Tests ->
+    fun ~include_dirs:_ ~same_dir_modules ~item _ ->
+      Clerk_backends.Ocaml.Tests.build_test ~same_dir_modules ~item
 
 let runtime_build_statements = function
   | OCaml -> Clerk_backends.Ocaml.Backend.runtime_build_statements
@@ -254,19 +244,6 @@ let gen_build_statements
       :: backends_module
     | _ -> []
   in
-  let tests =
-    if not (item.has_inline_tests || Lazy.force item.has_scope_tests) then []
-    else
-      [
-        Nj.build "tests" ~inputs:[catala_src]
-          ~implicit_in:
-            (!Var.clerk_exe
-            :: List.map
-                 (modfile ~backend:"ocaml" same_dir_modules "@ocaml-module")
-                 modules)
-          ~outputs:[catala_src ^ "@test"; catala_src ^ "@out"];
-      ]
-  in
   let statements_backend =
     List.map2 Seq.append backend_sources backend_objects
   in
@@ -277,7 +254,6 @@ let gen_build_statements
       Seq.return include_deps;
       List.to_seq expose_module;
       List.to_seq module_deps;
-      List.to_seq tests;
     ]
   in
   Seq.concat (List.to_seq (statements_list @ statements_backend))
