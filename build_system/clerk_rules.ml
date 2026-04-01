@@ -33,6 +33,20 @@ let backend_from_config = function
   | Clerk_config.Java -> Java
   | _ -> invalid_arg __FUNCTION__
 
+let name = function
+  | OCaml -> "ocaml"
+  | Python -> "python"
+  | C -> "c"
+  | Java -> "java"
+  | Tests -> "tests"
+
+let module_extension = function
+  | OCaml -> "@ocaml-module"
+  | Python -> ".py"
+  | C -> "@c-module"
+  | Java -> ".class"
+  | Tests -> ""
+
 let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in
   let test_flags = config.Clerk_cli.test_flags in
@@ -226,43 +240,26 @@ let gen_build_statements
     match item.module_def with
     | Some m when item.is_stdlib || List.mem dir include_dirs ->
       let modname = Mark.remove m in
+      let backends_module =
+        List.filter_map
+          (fun backend ->
+            if backend = Tests then None
+            else
+              let rule =
+                Nj.build "phony"
+                  ~outputs:
+                    [Format.sprintf "%s@%s-module" modname (name backend)]
+                  ~inputs:
+                    [
+                      modfile ~backend:(name backend) same_dir_modules
+                        (module_extension backend) modname;
+                    ]
+              in
+              Some rule)
+          enabled_backends
+      in
       Nj.build "phony" ~outputs:[modname ^ "@src"] ~inputs:[catala_src]
-      ::
-      (if List.mem OCaml enabled_backends then
-         [
-           Nj.build "phony"
-             ~outputs:[modname ^ "@ocaml-module"]
-             ~inputs:
-               [
-                 modfile ~backend:"ocaml" same_dir_modules "@ocaml-module"
-                   modname;
-               ];
-         ]
-       else [])
-      @ (if List.mem C enabled_backends then
-           [
-             Nj.build "phony"
-               ~outputs:[modname ^ "@c-module"]
-               ~inputs:
-                 [modfile ~backend:"c" same_dir_modules "@c-module" modname];
-           ]
-         else [])
-      @ (if List.mem Python enabled_backends then
-           [
-             Nj.build "phony"
-               ~outputs:[modname ^ "@python-module"]
-               ~inputs:
-                 [modfile ~backend:"python" same_dir_modules ".py" modname];
-           ]
-         else [])
-      @
-      if List.mem Java enabled_backends then
-        [
-          Nj.build "phony"
-            ~outputs:[modname ^ "@java-module"]
-            ~inputs:[modfile ~backend:"java" same_dir_modules ".class" modname];
-        ]
-      else []
+      :: backends_module
     | _ -> []
   in
   let tests =
