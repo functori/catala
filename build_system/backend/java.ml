@@ -144,13 +144,12 @@ module Backend = struct
     let module_target =
       Ninja.modfile ~backend:"java" same_dir_modules ".class"
     in
-    [
-      Nj.build "java-class"
-        ~inputs:[Ninja.target ~backend:"java" "java"]
-        ~implicit_in:("@runtime-java" :: List.map module_target modules)
-        ~outputs:[Ninja.target ~backend:"java" "class"]
-        ~vars:[Var.class_path, [java_class_path]];
-    ]
+    Seq.return
+      (Nj.build "java-class"
+         ~inputs:[Ninja.target ~backend:"java" "java"]
+         ~implicit_in:("@runtime-java" :: List.map module_target modules)
+         ~outputs:[Ninja.target ~backend:"java" "class"]
+         ~vars:[Var.class_path, [java_class_path]])
 
   let runtime_dir : File.t Lazy.t =
     lazy File.(Lazy.force Poll.runtime_dir / "java")
