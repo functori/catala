@@ -18,37 +18,38 @@
 open Clerk_utils
 open Catala_utils
 
-module Flags = struct
-  let default
-      ~variables
-      ~autotest
-      ~use_default_flags
-      ~test_flags
-      ~include_dirs:_ =
-    let catala_flags_java =
-      (if autotest then ["--autotest"] else [])
-      @
-      if use_default_flags then ["-O"]
-      else
-        List.filter
-          (function
-            | "-O" | "--optimize" | "--closure-conversion" -> true | _ -> false)
-          test_flags
-    in
-    let def = Common.Flags.def ~variables in
-    [
-      def Var.catala_flags_java (lazy catala_flags_java);
-      def Var.java (lazy ["java"]);
-      def Var.javac (lazy ["javac"]);
-      def Var.jar (lazy ["jar"]);
-      def Var.javac_flags (lazy ["-implicit:none"]);
-    ]
-end
-
 module Backend = struct
   open Var
   open File
   module Nj = Ninja_utils
+
+  module Flags = struct
+    let default
+        ~variables
+        ~autotest
+        ~use_default_flags
+        ~test_flags
+        ~include_dirs:_ =
+      let catala_flags_java =
+        (if autotest then ["--autotest"] else [])
+        @
+        if use_default_flags then ["-O"]
+        else
+          List.filter
+            (function
+              | "-O" | "--optimize" | "--closure-conversion" -> true
+              | _ -> false)
+            test_flags
+      in
+      let def = Common.Flags.def ~variables in
+      [
+        def Var.catala_flags_java (lazy catala_flags_java);
+        def Var.java (lazy ["java"]);
+        def Var.javac (lazy ["javac"]);
+        def Var.jar (lazy ["jar"]);
+        def Var.javac_flags (lazy ["-implicit:none"]);
+      ]
+  end
 
   let[@ocamlformat "disable"] static_base_rules =
     [
