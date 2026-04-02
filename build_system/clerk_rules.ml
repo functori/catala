@@ -37,7 +37,6 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in
   let test_flags = config.Clerk_cli.test_flags in
   let use_default_flags = test_flags = [] && options.global.catala_opts = [] in
-  let def = Backend_common.Flags.def ~variables:options.variables in
   let default_flags = Backend_common.Flags.default ~code_coverage ~config in
   default_flags
   @ (if List.mem OCaml enabled_backends then
@@ -51,24 +50,9 @@ let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
          ~include_dirs:options.global.include_dirs
      else [])
   @ (if List.mem Java enabled_backends then
-       let catala_flags_java =
-         (if autotest then ["--autotest"] else [])
-         @
-         if use_default_flags then ["-O"]
-         else
-           List.filter
-             (function
-               | "-O" | "--optimize" | "--closure-conversion" -> true
-               | _ -> false)
-             test_flags
-       in
-       [
-         def Var.catala_flags_java (lazy catala_flags_java);
-         def Var.java (lazy ["java"]);
-         def Var.javac (lazy ["javac"]);
-         def Var.jar (lazy ["jar"]);
-         def Var.javac_flags (lazy ["-implicit:none"]);
-       ]
+       Clerk_backends.Java.Flags.default ~variables:options.variables ~autotest
+         ~use_default_flags ~test_flags
+         ~include_dirs:options.global.include_dirs
      else [])
   @
   if List.mem C enabled_backends then
@@ -86,15 +70,8 @@ let[@ocamlformat "disable"] static_base_rules ~tests enabled_backends =
    else []) @
   (if List.mem Python enabled_backends then
     Clerk_backends.Python.Backend.static_base_rules else []) @
-  (if List.mem Java enabled_backends then [
-      Nj.rule "catala-java"
-        ~command:[!catala_exe; "java"; !catala_flags; !catala_flags_java;
-                  "-o"; !output; "--"; !input]
-        ~description:["<catala>"; "java"; "⇒"; !output];
-      Nj.rule "java-class"
-        ~command:[!javac; "-cp"; File.(Var.(!builddir) / Scan.libcatala / "java")^":" ^ !class_path; !javac_flags; !input]
-        ~description:["<catala>"; "java"; "⇒"; !output];
-    ] else []) @
+  (if List.mem Java enabled_backends then
+    Clerk_backends.Java.Backend.static_base_rules else []) @
   (if tests then
      [Nj.rule "tests"
         ~command:
@@ -199,18 +176,7 @@ let gen_build_statements
       in
       let java =
         if not (List.mem Java enabled_backends) then Seq.empty
-        else
-          let java, missing =
-            Ninja.extern_src ~backend:"java" ~ext:"java" ~missing:[]
-              ~filename:item.file_name
-          in
-          Ninja.check_missing ~backend:"java" ~missing
-            ~module_def:item.module_def ~filename:item.file_name;
-          List.to_seq
-            [
-              Nj.build "copy" ~implicit_in:[catala_src] ~inputs:[java]
-                ~outputs:[target ~backend:"java" "java"];
-            ]
+        else Clerk_backends.Java.Backend.external_copy item
       in
       ocaml, c, python, java
     else
@@ -232,9 +198,8 @@ let gen_build_statements
           has_scope_tests,
         Clerk_backends.Python.Backend.catala ?vars ~inputs ~implicit_in
           has_scope_tests,
-        Seq.return
-          (Nj.build "catala-java" ?vars ~inputs ~implicit_in
-             ~outputs:[target ~backend:"java" "java"]) )
+        Clerk_backends.Java.Backend.catala ?vars ~inputs ~implicit_in
+          has_scope_tests )
   in
   let ocamlopt =
     Clerk_backends.Ocaml.Backend.build_object ~include_dirs ~same_dir_modules
@@ -245,23 +210,8 @@ let gen_build_statements
       has_scope_tests
   in
   let javac =
-    let java_class_path =
-      String.concat ":"
-        ((!Var.tdir / "java")
-        :: List.map
-             (fun d ->
-               (if Filename.is_relative d then !Var.builddir / d else d)
-               / "java")
-             include_dirs)
-    in
-    Nj.build "java-class"
-      ~inputs:[target ~backend:"java" "java"]
-      ~implicit_in:
-        ("@runtime-java"
-        :: List.map (modfile ~backend:"java" same_dir_modules ".class") modules
-        )
-      ~outputs:[target ~backend:"java" "class"]
-      ~vars:[Var.class_path, [java_class_path]]
+    Clerk_backends.Java.Backend.build_object ~include_dirs ~same_dir_modules
+      ~item has_scope_tests
   in
   let expose_module =
     (* Note: these rules define global (top-level) aliases for module targets of
@@ -339,7 +289,7 @@ let gen_build_statements
      else [])
     @ (if List.mem C enabled_backends then [c; List.to_seq cc] else [])
     @ (if List.mem Python enabled_backends then [python] else [])
-    @ (if List.mem Java enabled_backends then [java; Seq.return javac] else [])
+    @ (if List.mem Java enabled_backends then [java; List.to_seq javac] else [])
     @ if tests then [List.to_seq tests_rules] else []
   in
   Seq.concat (List.to_seq statements_list)
