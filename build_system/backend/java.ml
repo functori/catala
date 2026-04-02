@@ -23,6 +23,9 @@ module Backend = struct
   open File
   module Nj = Ninja_utils
 
+  let name = "java"
+  let module_ext = ".class"
+
   module Flags = struct
     let default
         ~variables

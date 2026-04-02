@@ -73,6 +73,9 @@ end
 module Nj = Ninja_utils
 
 module Backend = struct
+  let name = "ocaml"
+  let module_ext = "@ocaml-module"
+
   module Flags = Flags
 
   let[@ocamlformat "disable"] static_base_rules =
