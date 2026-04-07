@@ -526,9 +526,6 @@ let run_ninja
     ?(clean_up_env = false)
     ?(ninja_flags = [])
     callback =
-  let enabled_backends =
-    if autotest then OCaml :: enabled_backends else enabled_backends
-  in
   let var_bindings =
     base_bindings ~code_coverage ~config ~enabled_backends ~autotest
   in

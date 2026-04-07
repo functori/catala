@@ -166,6 +166,9 @@ let backend_subdir_list =
     Clerk_rules.Tests, "";
   ]
 
+let normalize_backends : Clerk_rules.backend list -> Clerk_rules.backend list =
+  List.sort_uniq Stdlib.compare
+
 let subdir_backend_list =
   List.map (fun (bk, dir) -> dir, bk) backend_subdir_list
 
@@ -432,7 +435,7 @@ let build_clerk_target
   in
   let enabled_backends =
     List.map Clerk_rules.backend_from_config target.backends
-    |> List.sort_uniq Stdlib.compare
+    |> normalize_backends
   in
   let install_targets, all_modules_deps =
     Clerk_rules.run_ninja ~code_coverage:false ~config ~enabled_backends
@@ -596,14 +599,15 @@ let build_direct_targets
           else File.(build_dir / t))
         direct_targets
     in
+    let backends = if autotest then [Clerk_rules.OCaml] else [] in
     let enabled_backends =
       List.fold_left
         (fun acc t ->
           match File.extension t with
           | "" -> Clerk_rules.OCaml :: acc
           | _ -> target_backend config.options t :: acc)
-        [] direct_targets
-      |> List.sort_uniq Stdlib.compare
+        backends direct_targets
+      |> normalize_backends
     in
     let ninja_targets, exec_targets, var_bindings, link_deps =
       Clerk_rules.run_ninja ~code_coverage ~config ~enabled_backends ~quiet
@@ -1328,7 +1332,10 @@ let run_clerk_test
   in
   let enabled_backends =
     enable_backend backend
+    (* Clerk_rules.OCaml backend is required as autotest flag is true *)
+    :: Clerk_rules.OCaml
     :: (if backend = `Interpret then [Clerk_rules.Tests] else [])
+    |> normalize_backends
   in
   if backend <> `Interpret then
     let files_or_folders =
