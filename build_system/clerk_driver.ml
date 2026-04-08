@@ -1705,6 +1705,7 @@ let main_cmd =
     ]
 
 let main () =
+  let argv = Array.copy Sys.argv in
   let[@inline] exit_with_error excode emit =
     let bt = Printexc.get_raw_backtrace () in
     emit ();
@@ -1712,6 +1713,33 @@ let main () =
     exit excode
   in
   Sys.catch_break true;
+  (* Peek to load plugins before the command-line is parsed proper (plugins add
+     their own commands) *)
+  let () =
+    let plugins_dirs =
+      match
+        Cmdliner.Cmd.eval_peek_opts ~argv Clerk_cli.clerk_plugins_dir
+          ~version_opt:true
+      with
+      | Some plugin_dir, _ -> plugin_dir
+      | None, _ -> []
+    in
+    List.iter
+      (fun d ->
+        if d = "" then ()
+        else
+          match Sys.is_directory d with
+          | true -> Clerk_plugin.load_dir d
+          | false -> Message.debug "Could not read plugin directory %s" d
+          | exception Sys_error _ ->
+            Message.debug "Could not read plugin directory %s" d)
+      plugins_dirs;
+    Dynlink.allow_only
+      (List.filter
+         (function
+           | "Driver__Plugin" | "Catala_utils__Global" -> false | _ -> true)
+         (Dynlink.all_units ()))
+  in
   try exit (Cmdliner.Cmd.eval' ~catch:false main_cmd) with
   | Catala_utils.Cli.Exit_with n -> exit n
   | Message.CompilerError content ->

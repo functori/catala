@@ -23,6 +23,7 @@ val catala_opts : string list Term.t
 val autotest : bool Term.t
 val prepare_only : bool Term.t
 val quiet : bool Term.t
+val clerk_plugins_dir : string list Term.t
 val build_dir : string option Term.t
 val include_dirs : string list Term.t
 val test_flags : string list Term.t
@@ -62,6 +63,7 @@ type config = {
   fix_path : File.t -> File.t;
   ninja_file : File.t option;
   test_flags : string list;
+  plugins_dir : string list;
 }
 
 val init_term : ?allow_test_flags:bool -> unit -> config Term.t

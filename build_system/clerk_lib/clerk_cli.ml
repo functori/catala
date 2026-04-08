@@ -50,6 +50,40 @@ let autotest =
            guarantee that the necessary artifacts for interpretation are \
            present.")
 
+let exec_dir =
+  let cmd = Sys.argv.(0) in
+  if String.contains cmd '/' || String.contains cmd '\\' then
+    (* Do not use Sys.executable_name, which may resolve symlinks: we want the
+       original path. (e.g. _build/install/default/bin/foo is a symlink) *)
+    Filename.dirname cmd
+  else (* searched in PATH *)
+    Filename.dirname Sys.executable_name
+
+let clerk_plugins_dir =
+  let open Cmdliner.Arg in
+  let doc =
+    "Set the given directory to be searched for backend plugins. Set to $(b,-) \
+     to disable plugins"
+  in
+  let env = Cmd.Env.info "CLERK_PLUGINS" in
+  let default =
+    let ( / ) = Filename.concat in
+    let dev_plugin_dir = exec_dir / "plugins" in
+    if Sys.file_exists dev_plugin_dir then
+      (* When running tests in place, may need to lookup in _build/default
+         besides the exec *)
+      [dev_plugin_dir]
+    else
+      (* Otherwise, assume a standard layout: "<prefix>/bin/catala" besides
+         "<prefix>/lib/catala" *)
+      [
+        Filename.(dirname exec_dir) / "libexec" / "catala";
+        Filename.(dirname exec_dir) / "lib" / "catala" / "plugins_clerk";
+      ]
+  in
+  (value & opt_all string default & info ["plugin-dir"] ~docv:"DIR" ~env ~doc)
+  |> fun dirs -> Term.(const (function ["-"] -> [] | dirs -> dirs) $ dirs)
+
 let quiet =
   Arg.(
     value
@@ -393,9 +427,11 @@ type config = {
   fix_path : File.t -> File.t;
   ninja_file : File.t option;
   test_flags : string list;
+  plugins_dir : string list;
 }
 
 let init
+    plugins_dir
     test_flags
     config_file
     ninja_file
@@ -525,12 +561,14 @@ let init
     fix_path;
     ninja_file;
     test_flags;
+    plugins_dir;
   }
 
 let init_term ?(allow_test_flags = false) () =
   let test_flags = if allow_test_flags then test_flags else Term.const [] in
   Term.(
     const init
+    $ clerk_plugins_dir
     $ test_flags
     $ config_file
     $ ninja_output

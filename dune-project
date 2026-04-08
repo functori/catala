@@ -18,7 +18,7 @@
  (name catala)
  (sites
   (libexec plugins)
-  (libexec clerk_plugins)))
+  (libexec plugins_clerk)))
 
 (package
  (name catala-js))
