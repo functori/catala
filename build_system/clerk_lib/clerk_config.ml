@@ -136,7 +136,7 @@ let project_encoding =
        (dft_field ~name:"build_dir" ~default:default_global.build_dir string)
        (dft_field ~name:"target_dir" ~default:default_global.target_dir string)
 
-let target_encoding =
+let target_encoding () =
   let open Clerk_toml_encoding in
   conv
     (fun { tname; tmodules; ttests; backends; include_sources; include_objects }
@@ -167,7 +167,7 @@ let doc_encoding =
        @@ union (string_cases ["latex", Latex; "html", Html]))
        (opt_field ~name:"doc_options" @@ list string)
 
-let custom_rule_encoding =
+let custom_rule_encoding () =
   let open Clerk_toml_encoding in
   conv
     (fun { backend; in_exts; out_exts; commandline } ->
@@ -183,16 +183,16 @@ let custom_rule_encoding =
 
 let variables_encoding = Clerk_toml_encoding.(binding_list (list string))
 
-let raw_config_encoding =
+let raw_config_encoding () =
   let open Clerk_toml_encoding in
   table5
     (table_opt ~name:"project" project_encoding)
     (table_opt ~name:"variables" variables_encoding)
-    (multi_table ~name:"target" target_encoding)
+    (multi_table ~name:"target" (target_encoding ()))
     (multi_table ~name:"doc" doc_encoding)
-    (multi_table ~name:"rule" custom_rule_encoding)
+    (multi_table ~name:"rule" (custom_rule_encoding ()))
 
-let config_encoding : config_file Clerk_toml_encoding.t =
+let config_encoding () : config_file Clerk_toml_encoding.t =
   let open Clerk_toml_encoding in
   convt
     (fun { global; variables; targets; docs; custom_rules } ->
@@ -205,7 +205,7 @@ let config_encoding : config_file Clerk_toml_encoding.t =
         docs;
         custom_rules;
       })
-  @@ raw_config_encoding
+  @@ raw_config_encoding ()
 
 let pp_target_names fmt ts =
   Format.(
@@ -235,10 +235,10 @@ let read f =
         ~pos:(Pos.from_info f li col li (col + 1))
         "Error in Clerk configuration:@ %a" Format.pp_print_text msg
   in
-  let config = Clerk_toml_encoding.decode toml config_encoding in
+  let config = Clerk_toml_encoding.decode toml (config_encoding ()) in
   validate f config;
   config
 
 let write f config =
-  let toml = Clerk_toml_encoding.encode config config_encoding in
+  let toml = Clerk_toml_encoding.encode config (config_encoding ()) in
   File.with_out_channel ~bin:false f @@ fun oc -> Printer.to_channel oc toml

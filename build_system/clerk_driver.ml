@@ -127,50 +127,51 @@ let linking_dependencies items =
     in
     rem_dups (traverse [] item)
 
-let all_backends_with_config :
-    (Clerk_config.backend * (module Clerk_backends.Backend.S)) list =
-  [
-    Clerk_config.OCaml, (module Clerk_backends.Ocaml.Backend);
-    Clerk_config.C, (module Clerk_backends.C.Backend);
-    Clerk_config.Python, (module Clerk_backends.Python.Backend);
-    Clerk_config.Java, (module Clerk_backends.Java.Backend);
-  ]
+let all_backends_with_config () =
+  ([
+     Clerk_config.OCaml, (module Clerk_backends.Ocaml.Backend);
+     Clerk_config.C, (module Clerk_backends.C.Backend);
+     Clerk_config.Python, (module Clerk_backends.Python.Backend);
+     Clerk_config.Java, (module Clerk_backends.Java.Backend);
+   ]
+    : (Clerk_config.backend * (module Clerk_backends.Backend.S)) list)
+  @ List.of_seq (Hashtbl.to_seq Clerk_plugin.clerk_plugins)
 
-let backend_src_extensions =
+let backend_src_extensions () =
   List.map
     (fun (bk, (module B : Clerk_backends.Backend.S)) -> bk, B.src_extensions)
-    all_backends_with_config
+    (all_backends_with_config ())
 
-let backend_obj_extensions =
+let backend_obj_extensions () =
   List.map
     (fun (bk, (module B : Clerk_backends.Backend.S)) -> bk, B.obj_extensions)
-    all_backends_with_config
+    (all_backends_with_config ())
 
-let backend_extensions =
+let backend_extensions () =
   List.map
-    (fun (bk, exts) -> bk, exts @ List.assoc bk backend_obj_extensions)
-    backend_src_extensions
+    (fun (bk, exts) -> bk, exts @ List.assoc bk (backend_obj_extensions ()))
+    (backend_src_extensions ())
 
 let extensions_backend =
   ("cmxa", Clerk_config.OCaml)
   :: List.flatten
        (List.map
           (fun (bk, exts) -> List.map (fun e -> e, bk) exts)
-          backend_extensions)
+          (backend_extensions ()))
 
-let backend_subdir_list =
+let backend_subdir_list () =
   List.map
     (fun (bk, (module B : Clerk_backends.Backend.S)) -> bk, B.subdir)
-    all_backends_with_config
+    (all_backends_with_config ())
 
 let normalize_backends backends =
   List.sort_uniq Stdlib.compare backends
   |> List.map Clerk_rules.backend_from_config
 
 let subdir_backend_list =
-  List.map (fun (bk, dir) -> dir, bk) backend_subdir_list
+  List.map (fun (bk, dir) -> dir, bk) (backend_subdir_list ())
 
-let backend_subdir bk = List.assoc bk backend_subdir_list
+let backend_subdir bk = List.assoc bk (backend_subdir_list ())
 let rule_subdir rule = backend_subdir rule.Config.backend
 
 let linking_command ~build_dir ~backend ~var_bindings link_deps item target =
@@ -490,8 +491,9 @@ let build_clerk_target
                   / Scan.target_basename module_item
               in
               let extensions =
-                if target.include_objects then List.assoc bk backend_extensions
-                else List.assoc bk backend_src_extensions
+                if target.include_objects then
+                  List.assoc bk (backend_extensions ())
+                else List.assoc bk (backend_src_extensions ())
               in
               List.map
                 (fun ext -> (module_item, target, bk), base -.- ext)
@@ -514,8 +516,8 @@ let build_clerk_target
             in
             let exts =
               if tg.Config.include_objects then
-                List.assoc backend backend_extensions
-              else List.assoc backend backend_src_extensions
+                List.assoc backend (backend_extensions ())
+              else List.assoc backend (backend_src_extensions ())
             in
             List.map File.(fun ext -> tf -.- ext) exts
           in
@@ -544,8 +546,8 @@ let build_clerk_target
   |> List.iter (fun bk ->
       let dir = prefix_dir / backend_subdir bk in
       let extensions =
-        if target.include_objects then List.assoc bk backend_extensions
-        else List.assoc bk backend_src_extensions
+        if target.include_objects then List.assoc bk (backend_extensions ())
+        else List.assoc bk (backend_src_extensions ())
       in
       match bk with
       | Clerk_config.Java ->
@@ -1721,7 +1723,7 @@ let main () =
         Cmdliner.Cmd.eval_peek_opts ~argv Clerk_cli.clerk_plugins_dir
           ~version_opt:true
       with
-      | Some plugin_dir, _ -> plugin_dir
+      | Some plugins_dir, _ -> plugins_dir
       | None, _ -> []
     in
     List.iter
