@@ -24,13 +24,15 @@ module Nj = Ninja_utils
 
 type backend = (module Clerk_backends.Backend.S)
 
-let all_backends : backend list =
-  [
-    (module Clerk_backends.Ocaml.Backend);
-    (module Clerk_backends.C.Backend);
-    (module Clerk_backends.Java.Backend);
-    (module Clerk_backends.Python.Backend);
-  ]
+let all_backends =
+  ([
+     (module Clerk_backends.Ocaml.Backend);
+     (module Clerk_backends.C.Backend);
+     (module Clerk_backends.Java.Backend);
+     (module Clerk_backends.Python.Backend);
+   ]
+    : backend list)
+  @ Clerk_plugin.list ()
 
 let backend_from_config = function
   | Clerk_config.OCaml ->
@@ -41,7 +43,7 @@ let backend_from_config = function
     (module Clerk_backends.C.Backend : Clerk_backends.Backend.S)
   | Clerk_config.Java ->
     (module Clerk_backends.Java.Backend : Clerk_backends.Backend.S)
-  | _ -> invalid_arg __FUNCTION__
+  | config -> Hashtbl.find Clerk_plugin.clerk_plugins config
 
 let base_bindings ~code_coverage ~autotest ~enabled_backends ~config =
   let options = config.Clerk_cli.options in

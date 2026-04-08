@@ -1,4 +1,12 @@
 (library
+ (name clerk_plugin)
+ (public_name catala.clerk_plugin)
+ (libraries catala.catala_utils catala.clerk_lib catala.clerk_backends)
+ (modules clerk_plugin)
+ (flags
+  (:standard -open Clerk_lib)))
+
+(library
  (name clerk_driver)
  (public_name catala.clerk_driver)
  (libraries
@@ -7,6 +15,7 @@
   catala.surface
   catala.clerk_lib
   catala.clerk_backends
+  catala.clerk_plugin
   clerk_utils
   ninja_utils
   cmdliner

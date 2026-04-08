@@ -13,9 +13,12 @@
 ;;(using directory-targets 0.1)
 
 (using dune_site 0.1)
+
 (package
  (name catala)
- (sites (libexec plugins)))
+ (sites
+  (libexec plugins)
+  (libexec clerk_plugins)))
 
 (package
  (name catala-js))
