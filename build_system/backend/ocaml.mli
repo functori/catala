@@ -15,6 +15,13 @@
    License for the specific language governing permissions and limitations under
    the License. *)
 
+val runtime_ocaml :
+  string ->
+  ocaml_src:string ->
+  dates_base:string ->
+  ocaml_base:string ->
+  Ninja_utils.def list
+
 module Flags : sig
   val ocaml_link : string list Lazy.t
   val ocaml_include : string list Lazy.t
