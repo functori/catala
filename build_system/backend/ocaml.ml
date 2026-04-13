@@ -18,6 +18,8 @@
 open Clerk_utils
 open Catala_utils
 
+let backend_name = "ocaml"
+
 module Flags = struct
   let ocaml_include_and_lib : (string list * string list) Lazy.t =
     lazy
@@ -65,7 +67,7 @@ module Flags = struct
       def Var.ocaml_include
         (lazy
           (Lazy.force ocaml_include
-          @ Common.Flags.includes ~backend:"ocaml" include_dirs));
+          @ Common.Flags.includes ~backend:backend_name include_dirs));
     ]
 end
 
@@ -86,13 +88,13 @@ let runtime_ocaml backend ~ocaml_src ~dates_base ~ocaml_base =
         /../ "_build"
         / "default"
         / "runtimes"
-        / "ocaml"
+        / backend_name
         / "catala_runtime.cmi",
         Lazy.force Poll.runtime_dir
         /../ "_build"
         / "default"
         / "runtimes"
-        / "ocaml"
+        / backend_name
         / "dates_calc.cmi" )
     (* This won't work if dune is not in its standard configuration and
        "default" profile, but that won't affect anything outside of running
@@ -133,82 +135,81 @@ let runtime_ocaml backend ~ocaml_src ~dates_base ~ocaml_base =
 
 module Backend = struct
   open Var
-  module Nj = Ninja_utils
 
-  let name = "ocaml"
-  let module_ext = "@ocaml-module"
-  let subdir = "ocaml"
+  let name = backend_name
+  let module_ext = "@" ^ backend_name ^ "-module"
+  let subdir = backend_name
   let src_extensions = ["ml"; "mli"]
   let obj_extensions = ["cmi"; "cmo"; "cmx"; "o"; "cmxs"]
 
   let runtime_targets ~only_source =
-    [(if only_source then "@runtime-ocaml-src" else "@runtime-ocaml")]
+    [(if only_source then "@runtime-" ^ name ^ "-src" else "@runtime-" ^ name)]
 
   module Flags = Flags
 
   let[@ocamlformat "disable"] static_base_rules =
-    let runtime_include = File.(Var.(!builddir) / Scan.libcatala / "ocaml") in
+    let runtime_include = File.(Var.(!builddir) / Scan.libcatala / name) in
          [
-      Nj.rule "catala-ocaml"
-        ~command:[!catala_exe; "ocaml"; !catala_flags; !catala_flags_ocaml;
+      Nj.rule ("catala-" ^ name)
+        ~command:[!catala_exe; name; !catala_flags; !catala_flags_ocaml;
                   "-o"; !output; "--"; !input]
-        ~description:["<catala>"; "ocaml"; "⇒"; !output];
-      Nj.rule "ocaml-bytobject"
+        ~description:["<catala>"; name; "⇒"; !output];
+      Nj.rule (name ^ "-bytobject")
         ~command:[
           !ocamlc_exe; "-c"; !ocaml_flags; !ocaml_include; "-I"; runtime_include; !includes; !input
         ]
-        ~description:["<ocaml>"; "⇒"; !output];
+        ~description:["<" ^ name ^ ">"; "⇒"; !output];
 
-      Nj.rule "ocaml-natobject"
+      Nj.rule (name ^ "-natobject")
         ~command:[
           !ocamlopt_exe; "-c"; !ocaml_flags; !ocaml_include; "-I"; runtime_include; !includes; !input
         ]
-        ~description:["<ocaml>"; "⇒"; !output];
+        ~description:["<" ^ name ^ ">"; "⇒"; !output];
 
-      Nj.rule "ocaml-module"
+      Nj.rule (name ^ "-module")
         ~command:
           [!ocamlopt_exe; "-shared"; !ocaml_flags; !ocaml_include; "-I"; runtime_include; !input;
            "-o"; !output]
-        ~description:["<ocaml>"; "⇒"; !output];
+        ~description:["<" ^ name ^ ">"; "⇒"; !output];
     ]
 
   let runtime_dir : File.t Lazy.t =
-    lazy File.(Lazy.force Poll.runtime_dir / "ocaml")
+    lazy File.(Lazy.force Poll.runtime_dir / name)
 
   let external_copy item =
     let open Var in
     let open File in
     let catala_src = !Var.tdir / !Var.src in
     let ml, missing =
-      Ninja.extern_src ~filename:item.Scan.file_name ~backend:"ocaml" ~ext:"ml"
-        ~missing:[]
+      Ninja.extern_src ~filename:item.Scan.file_name ~backend:backend_name
+        ~ext:"ml" ~missing:[]
     in
     let mli, missing =
-      Ninja.extern_src ~filename:item.Scan.file_name ~backend:"ocaml" ~ext:"mli"
-        ~missing
+      Ninja.extern_src ~filename:item.Scan.file_name ~backend:backend_name
+        ~ext:"mli" ~missing
     in
-    Ninja.check_missing ~backend:"ocaml" ~module_def:item.Scan.module_def
+    Ninja.check_missing ~backend:backend_name ~module_def:item.Scan.module_def
       ~missing ~filename:item.file_name;
     List.to_seq
       [
         Nj.build "copy" ~implicit_in:[catala_src] ~inputs:[ml]
-          ~outputs:[Ninja.target ~backend:"ocaml" "ml"];
+          ~outputs:[Ninja.target ~backend:backend_name "ml"];
         Nj.build "copy" ~implicit_in:[catala_src] ~inputs:[mli]
-          ~outputs:[Ninja.target ~backend:"ocaml" "mli"];
+          ~outputs:[Ninja.target ~backend:backend_name "mli"];
       ]
 
   let runtime_build_statements ~options:_ ~stdbase =
     let open File in
-    let ocaml_src = Var.(!runtime) / "ocaml" in
-    let dates_base = stdbase / "ocaml" / "dates_calc" in
-    let ocaml_base = stdbase / "ocaml" / "catala_runtime" in
-    runtime_ocaml "ocaml" ~ocaml_src ~dates_base ~ocaml_base
+    let ocaml_src = Var.(!runtime) / name in
+    let dates_base = stdbase / name / "dates_calc" in
+    let ocaml_base = stdbase / name / "catala_runtime" in
+    runtime_ocaml name ~ocaml_src ~dates_base ~ocaml_base
     @ [
         Nj.build "phony"
           ~inputs:[ocaml_base -.- "cmx"]
           ~implicit_in:[dates_base -.- "cmi"]
-          ~outputs:["@runtime-ocaml"];
-        Nj.build "ocaml-natobject"
+          ~outputs:["@runtime-" ^ name];
+        Nj.build (name ^ "-natobject")
           ~inputs:[dates_base -.- "ml"; ocaml_base -.- "ml"]
           ~implicit_in:[dates_base -.- "cmi"; ocaml_base -.- "cmi"]
           ~outputs:[ocaml_base -.- "cmx"; ocaml_base -.- "o"];
@@ -216,17 +217,17 @@ module Backend = struct
 
   let catala ?vars ~inputs ~implicit_in has_scope_tests =
     let implicit_out =
-      if has_scope_tests then [Ninja.target ~backend:"ocaml" "+main.ml"] else []
+      if has_scope_tests then [Ninja.target ~backend:name "+main.ml"] else []
     in
     Seq.return
-      (Nj.build "catala-ocaml" ?vars ~inputs ~implicit_in
-         ~outputs:[Ninja.target ~backend:"ocaml" "ml"]
-         ~implicit_out:(Ninja.target ~backend:"ocaml" "mli" :: implicit_out))
+      (Nj.build ("catala-" ^ name) ?vars ~inputs ~implicit_in
+         ~outputs:[Ninja.target ~backend:name "ml"]
+         ~implicit_out:(Ninja.target ~backend:name "mli" :: implicit_out))
 
   let module_target same_dir_modules =
-    Ninja.modfile ~backend:"ocaml" same_dir_modules "@ocaml-module"
+    Ninja.modfile ~backend:name same_dir_modules module_ext
 
-  let includes = Common.Flags.include_flags ~backend:"ocaml"
+  let includes = Common.Flags.include_flags ~backend:name
 
   let build_object
       ~externls:_
@@ -240,10 +241,10 @@ module Backend = struct
     let implicit_modules = List.map (module_target same_dir_modules) modules in
     let obj =
       [
-        Nj.build "ocaml-bytobject"
-          ~inputs:[target ~backend:"ocaml" "mli"; target ~backend:"ocaml" "ml"]
-          ~implicit_in:(implicit_modules @ ["@runtime-cmi-ocaml"])
-          ~outputs:(List.map (target ~backend:"ocaml") ["cmi"; "cmo"])
+        Nj.build (name ^ "-bytobject")
+          ~inputs:[target ~backend:name "mli"; target ~backend:name "ml"]
+          ~implicit_in:(implicit_modules @ ["@runtime-cmi-" ^ name])
+          ~outputs:(List.map (target ~backend:name) ["cmi"; "cmo"])
           ~vars:
             [
               Var.includes, includes include_dirs;
@@ -265,12 +266,12 @@ module Backend = struct
                   "-no-alias-deps";
                 ] );
             ];
-        Nj.build "ocaml-natobject"
-          ~inputs:[target ~backend:"ocaml" "ml"]
+        Nj.build (name ^ "-natobject")
+          ~inputs:[target ~backend:name "ml"]
           ~implicit_in:
-            ((target ~backend:"ocaml" "cmi" :: implicit_modules)
-            @ ["@runtime-cmi-ocaml"])
-          ~outputs:(List.map (target ~backend:"ocaml") ["cmx"; "o"])
+            ((target ~backend:name "cmi" :: implicit_modules)
+            @ ["@runtime-cmi-" ^ name])
+          ~outputs:(List.map (target ~backend:name) ["cmx"; "o"])
           ~vars:[Var.includes, includes include_dirs];
       ]
     in
@@ -279,21 +280,21 @@ module Backend = struct
         | Some _ ->
           obj
           @ [
-              Nj.build "ocaml-module"
-                ~inputs:[target ~backend:"ocaml" "cmx"]
-                ~outputs:[target ~backend:"ocaml" "cmxs"];
+              Nj.build (name ^ "-module")
+                ~inputs:[target ~backend:name "cmx"]
+                ~outputs:[target ~backend:name "cmxs"];
             ]
         | None -> obj)
       @
       if has_scope_tests then
         [
-          Nj.build "ocaml-natobject"
-            ~inputs:[target ~backend:"ocaml" "+main.ml"]
+          Nj.build (name ^ "-natobject")
+            ~inputs:[target ~backend:name "+main.ml"]
             ~implicit_in:
-              [target ~backend:"ocaml" "cmi"; target ~backend:"ocaml" "cmx"]
+              [target ~backend:name "cmi"; target ~backend:name "cmx"]
             ~outputs:
               (List.map
-                 (fun ext -> target ~backend:"ocaml" ("+main." ^ ext))
+                 (fun ext -> target ~backend:name ("+main." ^ ext))
                  ["cmx"; "o"])
             ~vars:[Var.includes, includes include_dirs @ ["-w"; "-24"]];
         ]
@@ -305,11 +306,13 @@ module Backend = struct
     [
       Nj.build "phony"
         ~inputs:
-          [
-            Ninja.target ~backend:"ocaml" "cmi";
-            Ninja.target ~backend:"ocaml" "cmxs";
-          ]
+          [Ninja.target ~backend:name "cmi"; Ninja.target ~backend:name "cmxs"]
         ~implicit_in:(List.map (module_target same_dir_modules) used_modules)
-        ~outputs:[Ninja.target ~backend:"ocaml" "@ocaml-module"];
+        ~outputs:[Ninja.target ~backend:name module_ext];
     ]
+
+  let extra_rules ~externls:_ ~stdlib_tree:_ ~project_tree:_ _module_targets =
+    []
+
+  let extra_default = []
 end

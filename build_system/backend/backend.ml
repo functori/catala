@@ -64,4 +64,13 @@ module type S = sig
     Ninja_utils.def list
 
   val runtime_dir : File.t Lazy.t
+
+  val extra_rules :
+    externls:string list ->
+    stdlib_tree:(string * string list * Scan.item list) Seq.t ->
+    project_tree:(string * string list * Scan.item list) Seq.t ->
+    string list ->
+    Ninja_utils.def list
+
+  val extra_default : string list
 end
