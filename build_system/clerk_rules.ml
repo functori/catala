@@ -22,9 +22,9 @@ module Nj = Ninja_utils
 
 (**{1 Building rules}*)
 
-type backend = OCaml | Python | C | Java | Tests (* | JS *)
+type backend = OCaml | Python | C | Java (* | JS *)
 
-let all_backends = [OCaml; Python; C; Java; Tests]
+let all_backends = [OCaml; Python; C; Java]
 
 let backend_from_config = function
   | Clerk_config.OCaml -> OCaml
@@ -1046,6 +1046,7 @@ let with_ninja_process
 
 let run_ninja
     ~config
+    ?(tests = false)
     ?(enabled_backends = all_backends)
     ~quiet
     ~code_coverage
@@ -1054,7 +1055,7 @@ let run_ninja
     ?(ninja_flags = [])
     callback =
   let enabled_backends =
-    if autotest then OCaml :: enabled_backends else enabled_backends
+    if autotest || tests then OCaml :: enabled_backends else enabled_backends
   in
   let var_bindings =
     base_bindings ~code_coverage ~config ~enabled_backends ~autotest
@@ -1118,9 +1119,8 @@ let run_ninja
               Some (f, fl, items))
       in
       let items =
-        output_ninja_file nin_ppf ~config
-          ~tests:(List.mem Tests enabled_backends)
-          ~enabled_backends ~autotest ~var_bindings stdlib_tree item_tree
+        output_ninja_file nin_ppf ~config ~tests ~enabled_backends ~autotest
+          ~var_bindings stdlib_tree item_tree
       in
       let ret = callback nin_ppf (List.of_seq items) var_bindings in
       Format.pp_print_newline nin_ppf ();
