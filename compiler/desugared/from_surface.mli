@@ -30,3 +30,7 @@ val translate_program :
 
     [allow_external] defaults to false unless the [gen_external] option is set.
 *)
+
+val translate_literal :
+  Surface.Ast.literal -> Catala_utils.Pos.t -> Shared_ast.lit
+(** Convert a surface literal to a typed literal. *)
