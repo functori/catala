@@ -394,10 +394,23 @@ let rec rule_tree_to_expr
     (def_pos : Pos.t)
     (params : D.expr Var.t list option)
     (tree : rule_tree) : ctx * untyped Ast.expr boxed =
-  let emark = Expr.no_attrs (Untyped { pos = def_pos }) in
   let exceptions, base_rules =
     match tree with Leaf r -> [], r | Node (exceptions, r) -> exceptions, r
   in
+  (* Position the combined default over the rules that make it up, rather than
+     over the variable's declaration: the trace reports this as the
+     ScopeVarDef position, and the declaration is already in [decl_pos]. *)
+  let def_pos =
+    let rule_pos r = Mark.get (RuleName.get_info r.D.rule_id) in
+    match base_rules with
+    | [] -> def_pos
+    | r0 :: rs ->
+      List.fold_left
+        (fun acc r ->
+          try Pos.join acc (rule_pos r) with Invalid_argument _ -> acc)
+        (rule_pos r0) rs
+  in
+  let emark = Expr.no_attrs (Untyped { pos = def_pos }) in
   (* because each rule has its own variables parameters and we want to convert
      the whole rule tree into a function, we need to perform some alpha-renaming
      of all the expressions *)
