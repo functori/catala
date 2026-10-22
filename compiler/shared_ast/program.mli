@@ -84,6 +84,11 @@ val to_expr : ((_ any, _) gexpr as 'e) program -> ScopeName.t -> 'e boxed
     corresponding to the main program and returning the main scope as a
     function. *)
 
+val topdef_to_expr :
+  ((_ any, _) gexpr as 'e) program -> TopdefName.t -> 'e boxed
+(** Same as [to_expr], but the expression returns the value of the given
+    toplevel definition *)
+
 val find_scope : ScopeName.t -> 'e code_item_list -> 'e scope_body
 
 val modules_to_list :

@@ -102,7 +102,7 @@ scope Values:
 #[trace.assert = (v.Values.l, [4; 5; 6])]
 #[trace.assert = (v.Values.l_empty, [])]
 #[trace.assert = (v.Values.period, (|2024-01-01|, |2024-12-31|))]
-#[trace.assert = (v.Values.o_present, 4)]
+#[trace.assert = (v.Values.o_present, Present content 4)]
 #[trace.assert = (v.Values.o_absent, Absent)]
 declaration scope TestValues:
   output v scope Values

@@ -118,14 +118,14 @@ let to_expr (ctx : decl_ctx) (body : 'e scope_body) : 'e boxed =
     [TStruct body.scope_body_input_struct, pos]
     pos
 
-let unfold (ctx : decl_ctx) (s : 'e code_item_list) (main_scope : ScopeName.t) :
-    'e boxed =
+(* Builds the expression binding all the code items, and returning the one for
+   which [get_mark] returns the mark of the variable *)
+let unfold_to (ctx : decl_ctx) (s : 'e code_item_list) get_mark : 'e boxed =
   BoundList.fold_lr s ~top:None
     ~down:(fun v item main ->
-      match main, item with
-      | None, ScopeDef (name, body) when ScopeName.equal name main_scope ->
-        Some (Expr.make_var v (get_body_mark body))
-      | r, _ -> r)
+      match main with
+      | None -> Option.map (Expr.make_var v) (get_mark item)
+      | r -> r)
     ~bottom:(fun _vlist -> function Some v -> v | None -> raise Not_found)
     ~up:(fun var item next ->
       let e, typ =
@@ -134,6 +134,18 @@ let unfold (ctx : decl_ctx) (s : 'e code_item_list) (main_scope : ScopeName.t) :
         | Topdef (_, typ, _vis, expr) -> Expr.rebox expr, typ
       in
       Expr.make_let_in (Mark.add Pos.void var) typ e next (Expr.pos e))
+
+let unfold ctx s main_scope =
+  unfold_to ctx s (function
+    | ScopeDef (name, body) when ScopeName.equal name main_scope ->
+      Some (get_body_mark body)
+    | _ -> None)
+
+let unfold_topdef ctx s topdef =
+  unfold_to ctx s (function
+    | Topdef (name, _, _, e) when TopdefName.equal name topdef ->
+      Some (Mark.get e)
+    | _ -> None)
 
 let empty_input_struct_dcalc ctx in_struct_name mark =
   let field_tys = StructName.Map.find in_struct_name ctx.ctx_structs in

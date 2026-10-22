@@ -73,6 +73,9 @@ val to_expr : decl_ctx -> ('a any, 'm) gexpr scope_body -> ('a, 'm) boxed_gexpr
 val unfold_body_expr : decl_ctx -> 'e scope_body_expr -> 'e boxed
 val unfold : decl_ctx -> 'e code_item_list -> ScopeName.t -> 'e boxed
 
+val unfold_topdef : decl_ctx -> 'e code_item_list -> TopdefName.t -> 'e boxed
+(** Same as [unfold], but returns the given toplevel definition *)
+
 val typ : _ scope_body -> typ
 (** builds the arrow type for the specified scope *)
 

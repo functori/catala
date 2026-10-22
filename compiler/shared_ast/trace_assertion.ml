@@ -72,7 +72,6 @@ type failed_trace_assertions = {
 }
 
 let empty = M.empty
-let add_asserted_trace_variable name value map = M.add name value map
 
 (* Alternative lookup, kept for reference: instead of following an explicit JSON
    path, it searches the trace by element name. Not wired into
@@ -153,6 +152,11 @@ let unwrap_optional (value : Runtime.Value.t) :
   in
   unwrap None value
 
+(* Expected values are typed: like the traced values (see [check]), their
+   [Optional] layers are unwrapped *)
+let add_asserted_trace_variable name value map =
+  M.add name (Option.map (fun v -> fst (unwrap_optional v)) value) map
+
 (* Raised by [matches] when the runtime can't compare two leaves *)
 exception Uncomparable of string
 
@@ -160,40 +164,14 @@ exception Uncomparable of string
    information (see [Surface.Expr_value]): enums may have an empty name and
    constructor indices are meaningless, so they are matched by constructor
    name. Leaves are delegated to [Runtime.Value.equal]. *)
-let rec matches pos ~expected actual =
-  let open Runtime.Value in
-  match expected, actual with
-  | V (Array te, ve), V (Array ta, va) ->
-    Array.length ve = Array.length va
-    && Array.for_all2
-         (fun e a -> matches pos ~expected:e a)
-         (Array.map te ve) (Array.map ta va)
-  | V (Tuple te, ve), V (Tuple ta, va) ->
-    let le = te ve and la = ta va in
-    List.compare_lengths le la = 0
-    && List.for_all2 (fun e a -> matches pos ~expected:e a) le la
-  | V (Struct se, ve), V (Struct sa, va) ->
-    let fe = se.fields ve and fa = sa.fields va in
-    List.compare_lengths fe fa = 0
-    && List.for_all
-         (fun (f, e) ->
-           match List.assoc_opt f fa with
-           | Some a -> matches pos ~expected:e a
-           | None -> false)
-         fe
-  | V (Enum ee, ve), V (Enum ea, va) ->
-    (ee.name = "" || ee.name = ea.name)
-    &&
-    let _, ce, xe = ee.constr ve and _, ca, xa = ea.constr va in
-    ce = ca && Option.equal (fun e a -> matches pos ~expected:e a) xe xa
-  | _ -> (
-    try Runtime.Value.equal pos expected actual
-    with Runtime.Error (err, _, note) ->
-      raise
-        (Uncomparable
-           (match note with
-           | Some note -> Runtime.error_message err ^ ": " ^ note
-           | None -> Runtime.error_message err)))
+let matches pos ~expected actual =
+  try Runtime.Value.equal pos expected actual
+  with Runtime.Error (err, _, note) ->
+    raise
+      (Uncomparable
+         (match note with
+         | Some note -> Runtime.error_message err ^ ": " ^ note
+         | None -> Runtime.error_message err))
 
 let check ~asserted_trace_variables ~tested_scope (trace : Runtime.trace) =
   if M.is_empty asserted_trace_variables || List.length trace = 0 then (

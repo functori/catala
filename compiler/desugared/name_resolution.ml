@@ -152,6 +152,13 @@ let handle_extra_attributes context plugin path value pos =
         None
       | Some (_, _, _, callback) -> callback ~pos value))
 
+type Pos.attr +=
+  | SurfaceTraceAssert of {
+      path : string;
+      var : Surface.Ast.expression;
+      expected : Surface.Ast.expression;
+    }
+
 let translate_attr ~context = function
   | Src ((p1 :: ps, ppos), v, pos) -> (
     match p1 with
@@ -165,7 +172,7 @@ let translate_attr ~context = function
           | Ast.Expression
               (Tuple [((Ident _, _ | Dotted _, _) as ident); expr], _) ->
             let path = Format.asprintf "%a" Print.format_expr ident in
-            Some (TraceAssert (path, Expr_value.value_of_expression expr))
+            Some (SurfaceTraceAssert { path; var = ident; expected = expr })
           | _ ->
             Message.warning ~pos
               "Attribute @{<magenta>#[trace.assert]@} is not well formed";
@@ -191,7 +198,7 @@ let translate_attr ~context = function
             (* In the trace, the states of a variable are named [var#state]
                (see [Scopelang.From_desugared]) *)
             let path = Format.asprintf "%a#%s" Print.format_expr ident state in
-            Some (TraceAssert (path, Expr_value.value_of_expression expr))
+            Some (SurfaceTraceAssert { path; var = ident; expected = expr })
           | _ ->
             Message.warning ~pos
               "Attribute @{<magenta>#[trace.assert_state]@} is not well formed";

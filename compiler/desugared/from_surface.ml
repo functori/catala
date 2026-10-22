@@ -1863,6 +1863,137 @@ let process_topdef
   in
   { modul with module_topdefs }
 
+(* The values expected by the [#[trace.assert]] attributes are expressions that
+   may refer to enum constructors, structs or toplevel definitions: to be
+   evaluated by the interpreter, they need to go through the whole compilation
+   pipeline. Each one is turned into a hidden (private) toplevel definition,
+   whose type is that of the asserted variable, and which is marked with the
+   [TraceAssert] attribute so that the interpreter can find it back. *)
+let add_trace_assertion_topdefs
+    (ctxt : Name_resolution.context)
+    (prg : Ast.program) : Ast.program =
+  (* The type of the asserted variable: [var], or a path through scope calls,
+     e.g. [sub.Scope.var]. The path follows what can be looked into in the
+     trace: the variables of scope calls, but not the contents of values *)
+  (* Récuperer le type de la var, le chemin qu'on donne via a.B.c.D.e *)
+  let var_typ scope var =
+    (* On a besoin de la fonction qui permet de récupèrer ce à quoi correspond l'id qu'on regarde
+    par exemple a c'est quoi son "type" ? une scope var ? un Scope ? *)
+    let find_in_scope scope (id, _) =
+      (* On rrecupère le contexte du scope dans lequel on se trouve en prenant dans le contexte globale
+      qui contient tous les scopes, *)
+      (* Selon claude ce find ne peut pas raise une exceptio, le scope passé ici n'est jamais tiré du texte
+      de l'utilisateur mais j'avoue que j'ai du mal a comprendre a nan si j'ai compris le scope qui est utilisé
+      vient tout simplement de pr*)
+      let s_ctxt = ScopeName.Map.find scope ctxt.scopes in
+      (* Tu cherches la var*)
+      match Ident.Map.find_opt id s_ctxt.Name_resolution.var_idmap with
+      | Some (ScopeVar v) ->
+        (*si c'est une scope var tu retournes son type *)
+        Some (`Typ (Name_resolution.get_var_typ ctxt v))
+      | Some (SubScope (_, sub_scope)) ->
+        (* Si c'est un scope tu retournes le scope en question *)
+        Some (`Scope sub_scope)
+      | None -> None
+    in
+    (* A variable whose type is the output struct of a scope holds the result
+       of a call to that scope (e.g. [internal ic content I]): in the trace, it
+       is a scope call, whose variables (including the internal ones) can be
+       looked into. Other struct values can't. *)
+    let scope_of_out_struct str =
+      ScopeName.Map.fold
+        (fun scope s_ctxt acc ->
+          if StructName.equal s_ctxt.Name_resolution.scope_out_struct str then
+            Some scope
+          else acc)
+        ctxt.scopes None
+    in
+    let rec resolve e =
+      match Mark.remove e with
+      | S.Ident ([], id, None) -> find_in_scope scope id
+      | S.Dotted (e, ((_, id), _)) -> (
+        match resolve e with
+        | Some (`Scope sub_scope) -> find_in_scope sub_scope id
+        | Some (`Typ (TStruct str, _)) ->
+          Option.bind (scope_of_out_struct str) (fun scope ->
+              find_in_scope scope id)
+        | _ -> None)
+      | _ -> None
+    in
+    match resolve var with Some (`Typ typ) -> Some typ | _ -> None
+  in
+  let path = List.rev ctxt.local.current_revpath in
+  let topdefs =
+    ScopeName.Map.fold
+      (fun scope _ topdefs ->
+        let scope_pos = Mark.get (ScopeName.get_info scope) in
+        Pos.get_attrs scope_pos (function
+          | Name_resolution.SurfaceTraceAssert
+              { path = trace_path; var; expected } ->
+            Some (trace_path, var, expected)
+          | _ -> None)
+        |> List.fold_left
+             (fun topdefs (trace_path, var, expected) ->
+               let typ =
+                 match var_typ scope var with
+                 | Some typ -> typ
+                 | None ->
+                   (* The variable can't be found (e.g. a typo):
+                      the type of the expected value is left
+                      to inference. The variable will be missing from the
+                      trace, and the interpreter will report the assertion as
+                      failed. *)
+                   Type.any (Mark.get expected)
+               in
+               let pos = Mark.get expected in
+               let name =
+                 TopdefName.fresh path
+                   ( "trace_assert",
+                     Pos.add_attr pos (TraceAssert { scope; path = trace_path })
+                   )
+               in
+               (* Créer l'expression via translate expression et on peut l'unbox tout de suite en verifiant qu'ell est bien fermé, pas de variable
+               libre quoi *)
+               let expr =
+                 Expr.unbox_closed
+                   (translate_expr None None ctxt Ident.Map.empty expected)
+               in
+               TopdefName.Map.add name
+                 {
+                   Ast.topdef_expr = Some expr;
+                   topdef_type = typ;
+                   topdef_arg_names = [];
+                   topdef_visibility = Private;
+                   topdef_external = false;
+                 }
+                 topdefs)
+             topdefs)
+      prg.program_root.module_scopes TopdefName.Map.empty
+  in
+  {
+    prg with
+    program_root =
+      {
+        prg.program_root with
+        module_topdefs =
+          TopdefName.Map.union
+            (* No collision is possible: the trace assertion topdefs were just
+               created by [TopdefName.fresh], whose ids are unique *)
+            (fun _ _ _ -> assert false)
+            prg.program_root.module_topdefs topdefs;
+      };
+    program_ctx =
+      {
+        prg.program_ctx with
+        ctx_topdefs =
+          (* contient le type de toute les top defs ainsi que leurs visibilité *)
+          TopdefName.Map.fold
+            (fun name td ->
+              TopdefName.Map.add name (td.Ast.topdef_type, Private))
+            topdefs prg.program_ctx.ctx_topdefs;
+      };
+  }
+
 let attribute_to_io (attr : S.scope_decl_context_io) : Ast.io =
   {
     Ast.io_output = attr.scope_decl_context_io_output;
@@ -2212,6 +2343,11 @@ let translate_program
         fold_left_catch_errors (process_structure ctxt) desugared.program_root
           surface.S.program_items;
     }
+  in
+  let desugared =
+    if Global.options.check_trace_assertion then
+      add_trace_assertion_topdefs ctxt desugared
+    else desugared
   in
   let desugared =
     match Global.options.gen_external, ctxt.local.is_external with

@@ -1014,13 +1014,15 @@ let rec evaluate_expr : type d r.
 let evaluate_expr_trace : type d r.
     ?on_expr:(((d, r, yes) interpr_kind, 'm) gexpr -> unit) ->
     ?disable_trace:bool ->
+    ?trace_assertions:Trace_assertion.trace_assertions ->
     decl_ctx ->
     Global.backend_lang ->
     ScopeName.t ->
     ((d, r, yes) interpr_kind, 't) gexpr ->
     ((d, r, yes) interpr_kind, 't) gexpr
     * Trace_assertion.failed_trace_assertions list =
- fun ?on_expr ?(disable_trace = false) ctx lang s e ->
+ fun ?on_expr ?(disable_trace = false)
+     ?(trace_assertions = Trace_assertion.empty) ctx lang s e ->
   Fun.protect
     (fun () ->
       let f () = evaluate_expr ?on_expr ctx lang e in
@@ -1036,21 +1038,9 @@ let evaluate_expr_trace : type d r.
         in
         let failures =
           if Global.options.check_trace_assertion then
-            let trace_assert =
-              Pos.get_attrs
-                (snd (ScopeName.get_info s))
-                (function
-                  | TraceAssert (path, value) -> Some (path, value) | _ -> None)
-            in
-            let trace = Runtime.retrieve_trace () in
-            let trace_assert =
-              List.fold_left
-                (fun acc (path, value) ->
-                  Trace_assertion.add_asserted_trace_variable path value acc)
-                Trace_assertion.empty trace_assert
-            in
-            Trace_assertion.check ~asserted_trace_variables:trace_assert
-              ~tested_scope:scope_name trace
+            Trace_assertion.check ~asserted_trace_variables:trace_assertions
+              ~tested_scope:scope_name
+              (Runtime.retrieve_trace ())
           else []
         in
         expr, failures
@@ -1094,16 +1084,17 @@ let report_trace_assertion_failures s failures =
 let evaluate_expr_safe_with_trace_failures : type d r.
     ?on_expr:(((d, r, yes) interpr_kind, 'm) gexpr -> unit) ->
     ?disable_trace:bool ->
+    ?trace_assertions:Trace_assertion.trace_assertions ->
     decl_ctx ->
     Global.backend_lang ->
     ScopeName.t ->
     ((d, r, yes) interpr_kind, 't) gexpr ->
     ((d, r, yes) interpr_kind, 't) gexpr
     * Trace_assertion.failed_trace_assertions list =
- fun ?on_expr ?disable_trace ctx lang s e ->
+ fun ?on_expr ?disable_trace ?trace_assertions ctx lang s e ->
   try
     let r, failures =
-      evaluate_expr_trace ?on_expr ?disable_trace ctx lang s e
+      evaluate_expr_trace ?on_expr ?disable_trace ?trace_assertions ctx lang s e
     in
     report_trace_assertion_failures s failures;
     Message.report_delayed_errors_if_any ();
@@ -1121,14 +1112,16 @@ let evaluate_expr_safe_with_trace_failures : type d r.
 let evaluate_expr_safe : type d r.
     ?on_expr:(((d, r, yes) interpr_kind, 'm) gexpr -> unit) ->
     ?disable_trace:bool ->
+    ?trace_assertions:Trace_assertion.trace_assertions ->
     decl_ctx ->
     Global.backend_lang ->
     ScopeName.t ->
     ((d, r, yes) interpr_kind, 't) gexpr ->
     ((d, r, yes) interpr_kind, 't) gexpr =
- fun ?on_expr ?disable_trace ctx lang s e ->
+ fun ?on_expr ?disable_trace ?trace_assertions ctx lang s e ->
   fst
-    (evaluate_expr_safe_with_trace_failures ?on_expr ?disable_trace ctx lang s e)
+    (evaluate_expr_safe_with_trace_failures ?on_expr ?disable_trace
+       ?trace_assertions ctx lang s e)
 
 (* Typing shenanigan to add custom terms to the AST type. *)
 let addcustom e =
@@ -1204,6 +1197,38 @@ let convert_json_input ctx scope_ty json =
   let encoding = Encoding.make_encoding ctx scope_ty in
   Encoding.parse_json encoding json
 
+(* Evaluates the hidden toplevel definitions holding the values expected by the
+   [#[trace.assert]] attributes of scope [s] (see [Desugared.From_surface]). This
+   must be done before the traced execution of the scope: these evaluations
+   reset the trace. *)
+let trace_assertions p s =
+  if not Global.options.check_trace_assertion then Trace_assertion.empty
+  else
+    fst
+    @@ BoundList.fold_left p.code_items ~init:Trace_assertion.empty
+         ~f:(fun acc item _var ->
+           match item with
+           | ScopeDef _ -> acc
+           | Topdef (name, _, _, _) -> (
+             match
+               Pos.get_attrs
+                 (Mark.get (TopdefName.get_info name))
+                 (function
+                   | TraceAssert { scope; path } when ScopeName.equal scope s ->
+                     Some path
+                   | _ -> None)
+             with
+             | [] -> acc
+             | path :: _ ->
+               let e = Expr.unbox (Program.topdef_to_expr p name) in
+               let value =
+                 evaluate_expr_safe ~disable_trace:true p.decl_ctx p.lang s
+                   (addcustom e)
+               in
+               Trace_assertion.add_asserted_trace_variable path
+                 (Some (Expr.embed_value p.decl_ctx value))
+                 acc))
+
 let interpret_program_lcalc ?input p s :
     (Uid.MarkedString.info * ('a, 'm) gexpr) list =
   let e = Expr.unbox @@ Program.to_expr p s in
@@ -1233,8 +1258,11 @@ let interpret_program_lcalc ?input p s :
         [TStruct s_in, Expr.pos e]
         (Expr.pos e)
     in
+    let trace_assertions = trace_assertions p s in
     match
-      Mark.remove (evaluate_expr_safe ctx p.lang s (Expr.unbox to_interpret))
+      Mark.remove
+        (evaluate_expr_safe ~trace_assertions ctx p.lang s
+           (Expr.unbox to_interpret))
     with
     | EStruct { fields; _ } ->
       List.map
@@ -1286,8 +1314,10 @@ let interpret_program_dcalc ?input ?on_expr p s :
         [TStruct s_in, Expr.pos e]
         (Expr.pos e)
     in
+    let trace_assertions = trace_assertions p s in
     match
-      evaluate_expr_safe ?on_expr ctx p.lang s (Expr.unbox to_interpret)
+      evaluate_expr_safe ?on_expr ~trace_assertions ctx p.lang s
+        (Expr.unbox to_interpret)
     with
     | EStruct { fields; _ }, _ ->
       List.map

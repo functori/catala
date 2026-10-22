@@ -138,6 +138,19 @@ val register_attribute :
 val translate_pos : attribute_context -> Pos.t -> Pos.t
 (** May trigger warnings on unrecognised attributes *)
 
+type Pos.attr +=
+  | SurfaceTraceAssert of {
+      path : string;
+          (** The name of the variable in the trace, including its state for
+              [#[trace.assert_state]] ([var#state]) *)
+      var : Surface.Ast.expression;  (** The asserted scope variable *)
+      expected : Surface.Ast.expression;  (** Its expected value *)
+    }
+        (** [#[trace.assert]] and [#[trace.assert_state]] attributes, as
+            attached to the scope declaration. [Desugared.From_surface] turns
+            the expected values into hidden toplevel definitions, marked with
+            [Shared_ast.TraceAssert] *)
+
 (** {1 Helpers} *)
 
 val raise_unsupported_feature : string -> Pos.t -> 'a

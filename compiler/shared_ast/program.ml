@@ -157,6 +157,11 @@ let to_expr p main_scope =
   Expr.Box.assert_closed (Expr.Box.lift res);
   res
 
+let topdef_to_expr p topdef =
+  let res = Scope.unfold_topdef p.decl_ctx p.code_items topdef in
+  Expr.Box.assert_closed (Expr.Box.lift res);
+  res
+
 let modules_to_list ?(trim_stdlib = false) (mt : module_tree) =
   let rec aux acc mtree =
     ModuleName.Map.fold
