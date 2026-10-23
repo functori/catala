@@ -1214,12 +1214,17 @@ let trace_assertions p s =
                Pos.get_attrs
                  (Mark.get (TopdefName.get_info name))
                  (function
-                   | TraceAssert { scope; path } when ScopeName.equal scope s ->
-                     Some path
+                   | TraceAssert { scope; path; invalid }
+                     when ScopeName.equal scope s ->
+                     Some (path, invalid)
                    | _ -> None)
              with
              | [] -> acc
-             | path :: _ ->
+             | (path, Some source) :: _ ->
+               Trace_assertion.add_asserted_trace_variable path
+                 (Some (Trace_assertion.invalid_value source))
+                 acc
+             | (path, None) :: _ ->
                let e = Expr.unbox (Program.topdef_to_expr p name) in
                let value =
                  evaluate_expr_safe ~disable_trace:true p.decl_ctx p.lang s

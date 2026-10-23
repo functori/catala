@@ -29,6 +29,10 @@ type trace_assertions
 
 val empty : trace_assertions
 
+val invalid_value : string -> value
+(** [invalid_value source] stands for an expected value that couldn't be
+    compiled: it is printed as [source], and matches no traced value *)
+
 val add_asserted_trace_variable :
   string -> value option -> trace_assertions -> trace_assertions
 

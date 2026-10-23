@@ -491,31 +491,36 @@ let get_possible_c_uids ctxt constructor =
     if EnumName.Map.is_empty current_module then possible else current_module
   with Ident.Map.Not_found _ -> raise_error_cons_not_found ctxt constructor
 
-let get_possible_unqualified_c_uids ctxt constructor =
+let get_possible_unqualified_c_uids ?enum_name ctxt constructor =
   let possible_c_uids = get_possible_c_uids ctxt constructor in
-  let possible_c_uids =
-    if Global.options.whole_program && EnumName.Map.cardinal possible_c_uids > 1
-    then
-      let used_modules =
-        ModuleName.Set.of_seq
-          (Ident.Map.to_seq ctxt.local.used_modules |> Seq.map snd)
-      in
-      EnumName.Map.filter
-        (fun ename _ ->
-          match List.rev (EnumName.path ename) with
-          | [] -> true
-          | mn :: _ -> ModuleName.Set.mem mn used_modules)
-        possible_c_uids
-    else possible_c_uids
-  in
-  if EnumName.Map.cardinal possible_c_uids > 1 then
-    Message.error ~pos:(Mark.get constructor)
-      "This constructor name is ambiguous, it can belong to@ %a.@ Disambiguate \
-       it by prefixing it with the enum name."
-      (EnumName.Map.format_keys ~pp_sep:(fun fmt () ->
-           Format.pp_print_string fmt " or "))
-      possible_c_uids;
-  EnumName.Map.choose possible_c_uids
+  match enum_name with
+  | Some enum_name -> enum_name, EnumName.Map.find enum_name possible_c_uids
+  | None ->
+    let possible_c_uids =
+      if
+        Global.options.whole_program
+        && EnumName.Map.cardinal possible_c_uids > 1
+      then
+        let used_modules =
+          ModuleName.Set.of_seq
+            (Ident.Map.to_seq ctxt.local.used_modules |> Seq.map snd)
+        in
+        EnumName.Map.filter
+          (fun ename _ ->
+            match List.rev (EnumName.path ename) with
+            | [] -> true
+            | mn :: _ -> ModuleName.Set.mem mn used_modules)
+          possible_c_uids
+      else possible_c_uids
+    in
+    if EnumName.Map.cardinal possible_c_uids > 1 then
+      Message.error ~pos:(Mark.get constructor)
+        "This constructor name is ambiguous, it can belong to@ %a.@ \
+         Disambiguate it by prefixing it with the enum name."
+        (EnumName.Map.format_keys ~pp_sep:(fun fmt () ->
+             Format.pp_print_string fmt " or "))
+        possible_c_uids;
+    EnumName.Map.choose possible_c_uids
 
 let rec disambiguate_constructor
     (ctxt : Name_resolution.context)
@@ -659,6 +664,7 @@ let nary_binder_to_tuple_function arg_ty pos binder argname pos_binder =
     disambiguate the scope and subscopes variables than occur in the expression,
     [None] is assumed to mean a toplevel definition *)
 let rec translate_expr
+    ?(typ : typ option)
     (scope : ScopeName.t option)
     (inside_definition_of : Ast.ScopeDef.t Mark.pos option)
     (ctxt : Name_resolution.context)
@@ -1045,7 +1051,21 @@ let rec translate_expr
     let mark_constructor = Untyped { pos = pos_constructor } in
     match path with
     | [] ->
-      let e_uid, c_uid = get_possible_unqualified_c_uids ctxt constructor in
+      let enum_name =
+        Option.map
+          (function
+            | TEnum enum_name, _ -> enum_name
+            | typ -> Message.error "%a" Print.typ typ)
+          typ
+      in
+      (* Still not happy with this, the enum_name argument is given when translating topdef
+        expresision from the trace.assert surface expression to a valid Desugared expression.
+        Without this argument the constructor is ambigue or just not find in the context declaration.
+        This is still not perfect as if the constructor is wrapped by paren or even in a structure or
+        nested constructor the enum_name would be lost and Catala compiler would return an error.  *)
+      let e_uid, c_uid =
+        get_possible_unqualified_c_uids ?enum_name ctxt constructor
+      in
       let c_uid =
         (* Retain the correct position *)
         EnumConstructor.map_info
@@ -1863,6 +1883,77 @@ let process_topdef
   in
   { modul with module_topdefs }
 
+(* Checks, ahead of its translation, that the constructors of the value expected
+   by a [#[trace.assert]] exist and fit [typ]: [translate_expr] would otherwise
+   report a (delayed) error, failing the whole compilation. Returns the position
+   and the description of the first mismatch. Types that are left to inference
+   accept any existing constructor; other mismatches are left to the
+   typing. *)
+let rec check_trace_assertion_constructors
+    (ctxt : Name_resolution.context)
+    (typ : typ)
+    (e : S.expression) : (Pos.t * (Format.formatter -> unit)) option =
+  let any = Type.any (Mark.get e) in
+  let is_inferred = function
+    | TVar _, _ | TForAll _, _ | TError, _ -> true
+    | _ -> false
+  in
+  let check typ e = check_trace_assertion_constructors ctxt typ e in
+  match Mark.remove e with
+  | S.Paren e -> check typ e
+  | S.EnumInject ((CBuiltin c, cpos), payload) -> (
+    match typ with
+    | TOption typ, _ -> (
+      match c with Present -> Option.bind payload (check typ) | Absent -> None)
+    | typ when is_inferred typ -> Option.bind payload (check any)
+    | typ ->
+      Some
+        ( cpos,
+          fun ppf ->
+            Format.fprintf ppf "an optional value doesn't fit type %a" Print.typ
+              typ ))
+  | S.EnumInject ((CConstr ([], (c, cpos)), _), payload) -> (
+    match Ident.Map.find_opt c ctxt.local.constructor_idmap with
+    | None ->
+      Some (cpos, fun ppf -> Format.fprintf ppf "unknown constructor %s" c)
+    | Some possible -> (
+      match typ with
+      | TEnum enum, _ -> (
+        match EnumName.Map.find_opt enum possible with
+        | None ->
+          Some
+            ( cpos,
+              fun ppf ->
+                Format.fprintf ppf "constructor %s doesn't belong to enum %a" c
+                  EnumName.format enum )
+        | Some c_uid ->
+          let payload_typ =
+            EnumConstructor.Map.find c_uid
+              (fst (EnumName.Map.find enum ctxt.enums))
+          in
+          Option.bind payload (check payload_typ))
+      | typ when is_inferred typ -> Option.bind payload (check any)
+      | typ ->
+        Some
+          ( cpos,
+            fun ppf ->
+              Format.fprintf ppf "constructor %s doesn't fit type %a" c
+                Print.typ typ )))
+  | S.EnumInject ((CConstr _, _), payload) ->
+    (* Qualified constructors are left to [translate_expr] *)
+    Option.bind payload (check any)
+  | S.ArrayLit es -> (
+    match typ with
+    | TArray typ, _ -> List.find_map (check typ) es
+    | _ -> List.find_map (check any) es)
+  | S.Tuple es -> (
+    match typ with
+    | TTuple typs, _ when List.length typs = List.length es ->
+      List.find_map (fun (typ, e) -> check typ e) (List.combine typs es)
+    | _ -> List.find_map (check any) es)
+  | S.StructLit (_, fields) -> List.find_map (fun (_, e) -> check any e) fields
+  | _ -> None
+
 (* The values expected by the [#[trace.assert]] attributes are expressions that
    may refer to enum constructors, structs or toplevel definitions: to be
    evaluated by the interpreter, they need to go through the whole compilation
@@ -1876,7 +1967,7 @@ let add_trace_assertion_topdefs
      e.g. [sub.Scope.var]. The path follows what can be looked into in the
      trace: the variables of scope calls, but not the contents of values *)
   (* Récuperer le type de la var, le chemin qu'on donne via a.B.c.D.e *)
-  let var_typ scope var =
+  let var_typ ~is_absent scope var : typ option =
     (* On a besoin de la fonction qui permet de récupèrer ce à quoi correspond l'id qu'on regarde
     par exemple a c'est quoi son "type" ? une scope var ? un Scope ? *)
     let find_in_scope scope (id, _) =
@@ -1920,7 +2011,13 @@ let add_trace_assertion_topdefs
         | _ -> None)
       | _ -> None
     in
-    match resolve var with Some (`Typ typ) -> Some typ | _ -> None
+    let rec unwrap_optional typ =
+      match typ with TOption typ, _ -> unwrap_optional typ | typ -> typ
+    in
+    match resolve var with
+    | Some (`Typ typ) when not is_absent -> Some (unwrap_optional typ)
+    | Some (`Typ typ) -> Some typ
+    | _ -> None
   in
   let path = List.rev ctxt.local.current_revpath in
   let topdefs =
@@ -1934,8 +2031,14 @@ let add_trace_assertion_topdefs
           | _ -> None)
         |> List.fold_left
              (fun topdefs (trace_path, var, expected) ->
+               let rec is_absent = function
+                 | S.Paren exp, _ -> is_absent exp
+                 | S.EnumInject ((CBuiltin Absent, _), None), _ -> true
+                 | _ -> false
+               in
+               let is_absent = is_absent expected in
                let typ =
-                 match var_typ scope var with
+                 match var_typ ~is_absent scope var with
                  | Some typ -> typ
                  | None ->
                    (* The variable can't be found (e.g. a typo):
@@ -1946,17 +2049,38 @@ let add_trace_assertion_topdefs
                    Type.any (Mark.get expected)
                in
                let pos = Mark.get expected in
+               (* Créer l'expression via translate expression et on peut l'unbox tout de suite en verifiant qu'ell est bien fermé, pas de variable
+               libre quoi *)
+               (* An expected value whose constructors don't fit (see
+                  [check_trace_assertion_constructors]) must not prevent the
+                  interpretation: the error is downgraded to a warning, and the
+                  expected value is replaced by a placeholder of type [unit].
+                  The source of the expected value is kept in the attribute,
+                  for the interpreter to report the assertion as failed. *)
+               let typ, expr, invalid =
+                 match check_trace_assertion_constructors ctxt typ expected with
+                 | None ->
+                   ( typ,
+                     Expr.unbox_closed
+                       (translate_expr ~typ None None ctxt Ident.Map.empty
+                          expected),
+                     None )
+                 | Some (cpos, msg) ->
+                   Message.warning ~pos:cpos
+                     "Invalid expected value for this trace assertion, it will \
+                      fail:@ %t"
+                     msg;
+                   ( (TLit TUnit, pos),
+                     Expr.unbox_closed (Expr.elit LUnit (Untyped { pos })),
+                     Some
+                       (Format.asprintf "%a" SurfacePrint.format_expr expected)
+                   )
+               in
                let name =
                  TopdefName.fresh path
                    ( "trace_assert",
-                     Pos.add_attr pos (TraceAssert { scope; path = trace_path })
-                   )
-               in
-               (* Créer l'expression via translate expression et on peut l'unbox tout de suite en verifiant qu'ell est bien fermé, pas de variable
-               libre quoi *)
-               let expr =
-                 Expr.unbox_closed
-                   (translate_expr None None ctxt Ident.Map.empty expected)
+                     Pos.add_attr pos
+                       (TraceAssert { scope; path = trace_path; invalid }) )
                in
                TopdefName.Map.add name
                  {

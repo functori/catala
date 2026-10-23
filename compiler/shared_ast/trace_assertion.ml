@@ -157,6 +157,14 @@ let unwrap_optional (value : Runtime.Value.t) :
 let add_asserted_trace_variable name value map =
   M.add name (Option.map (fun v -> fst (unwrap_optional v)) value) map
 
+(* Stands for an expected value that couldn't be compiled: it is printed as its
+   [source], and is equal to no traced value since no enum bears its name *)
+let invalid_value source =
+  Runtime.Value.V
+    ( Enum
+        { name = "<invalid trace assertion>"; constr = (fun s -> -1, s, None) },
+      source )
+
 (* Raised by [matches] when the runtime can't compare two leaves *)
 exception Uncomparable of string
 

@@ -456,10 +456,16 @@ type attr_value += String of string Mark.pos | Unit
 type Pos.attr +=
   | Src of attr_path * attr_value * Pos.t
   | DebugPrint of { label : string option }
-  | TraceAssert of { scope : ScopeName.t; path : string }
+  | TraceAssert of {
+      scope : ScopeName.t;
+      path : string;
+      invalid : string option;
+    }
         (** Marks the hidden toplevel definition holding the value expected by a
             [#[trace.assert]] attribute of [scope], for the trace variable
-            [path] (see [Desugared.From_surface]) *)
+            [path] (see [Desugared.From_surface]). [invalid] holds the source of
+            an expected value that couldn't be compiled: the definition is then
+            a placeholder, and the assertion fails *)
   | Test
   | Doc of string * Pos.t
   | ImplicitPosArg
