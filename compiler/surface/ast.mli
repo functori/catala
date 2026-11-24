@@ -264,6 +264,7 @@ type top_def = {
   topdef_name : lident Mark.pos;
   topdef_args : (lident Mark.pos * base_typ Mark.pos) list Mark.pos option;
       (** Empty list if this is not a function *)
+  topdef_infix : bool;
   topdef_type : typ;
   topdef_expr : expression option;
 }

@@ -1,0 +1,21 @@
+```catala
+declaration <add>
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x + y
+
+declaration scope S:
+  output x content integer
+
+scope S:
+  definition x equals add of 5, 6
+  assertion (x = 11)
+```
+
+```catala-test-cli
+$ catala test-scope S
+┌─[RESULT]─ S ─
+│ x = 11
+└─
+```

@@ -1764,6 +1764,18 @@ let process_topdef
     (is_public : bool)
     (is_external : bool)
     (def : S.top_def) : Ast.modul =
+  let () =
+    match def.topdef_args with
+    | Some (list_arg, _) when def.S.topdef_infix ->
+      let number_of_arg = List.length list_arg in
+      let topdef_name, pos = def.topdef_name in
+      if number_of_arg <> 2 then
+        Message.error ~pos
+          "A function defined as infix, should have exactly 2 arguments, the \
+           top definition %s has %d argument"
+          topdef_name number_of_arg
+    | _ -> ()
+  in
   let id =
     Ident.Map.find
       (Mark.remove def.S.topdef_name)

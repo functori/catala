@@ -943,6 +943,19 @@ let code_item :=
     topdef_args = args;
     topdef_type = type_from_args args ty;
     topdef_expr;
+    topdef_infix = false;
+  }, []
+}
+| DECLARATION ; LESSER ; name = lident ;
+  GREATER ; CONTENT ; ty = addpos(typ) ;
+  args = depends_stance ;
+  topdef_expr = option(opt_def) ; {
+  Topdef {
+    topdef_name = name;
+    topdef_args = args;
+    topdef_type = type_from_args args ty;
+    topdef_expr;
+    topdef_infix = true;
   }, []
 }
 | DECLARATION ; TYPE; name = uident ; COLON ; EXTERNAL ; {
