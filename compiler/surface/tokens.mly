@@ -30,6 +30,7 @@
 
 %token<string> LAW_TEXT
 %token<string> UIDENT LIDENT
+%token<string> INFIX_IDENT
 %token<string> END_CODE
 %token<string> INT_LITERAL
 %token<int * int * int> DATE_LITERAL

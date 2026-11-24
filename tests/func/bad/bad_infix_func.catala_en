@@ -4,13 +4,6 @@ declaration <add>
   depends on x content integer, y content integer, z content integer
   equals
     x + y + z
-
-declaration scope S:
-  output x content integer
-
-scope S:
-  definition x equals add of 5, 6, 7
-  assertion (x = 11)
 ```
 
 ```catala-test-cli

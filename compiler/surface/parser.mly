@@ -31,6 +31,23 @@
     Pos.overwrite_law_info (Pos.from_lpos lpos)
       (Parser_state.get_current_heading ())
 
+  (** Splits the contents of an [INFIX_IDENT] token ([<Mod.f>] without its
+      brackets) into its module path and function name, each with its own
+      position. *)
+  let infix_ident_parts s ((start : Lexing.position), _) =
+    let shift (p : Lexing.position) n = { p with pos_cnum = p.pos_cnum + n } in
+    let rec aux ofs = function
+      | [] -> []
+      | part :: rest ->
+        let len = Seq.length (String.utf8_seq part) in
+        (part, get_pos (shift start ofs, shift start (ofs + len)))
+        :: aux (ofs + len + 1) rest
+    in
+    (* offset 1 to skip the opening '<' *)
+    match List.rev (aux 1 (String.split_on_char '.' s)) with
+    | lid :: rev_path -> List.rev rev_path, lid
+    | [] -> assert false
+
   let type_from_args
       (args :
          (Ast.lident Mark.pos * Ast.base_typ Mark.pos) list Mark.pos option)
@@ -85,6 +102,7 @@ end>
 %right let_expr
 %right AND OR XOR (* Desugaring enforces proper parens later on *)
 %nonassoc GREATER GREATER_EQUAL LESSER LESSER_EQUAL EQUAL NOT_EQUAL
+%left INFIX_IDENT (* [a <f> b] *)
 %left PLUS MINUS PLUSPLUS
 %left MULT DIV
 %right apply OF CONTAINS WITH BUT_REPLACE OR_IF_LIST_EMPTY WILDCARD AND_THEN
@@ -265,6 +283,15 @@ let qlident :=
 }
 | id = lident ; { [], id }
 
+(* [<f>] or [<Mod.f>] is lexed as a single [INFIX_IDENT] token (without the
+   brackets): parsing it as [LESSER qlident GREATER] would conflict with the
+   comparison [a < b]. *)
+let infix_ident ==
+| s = INFIX_IDENT ; {
+  let path, lid = infix_ident_parts s $loc(s) in
+  Ident (path, lid, None), get_pos $loc(s)
+}
+
 let mbinder :=
 | id = attr(lident) ; { [id] }
 | LPAREN ; ids = separated_nonempty_list(COMMA,attr(lident)) ; RPAREN ; <>
@@ -381,6 +408,11 @@ let naked_expression ==
   binop = addpos(binop) ;
   e2 = expression ; {
   Binop (binop, e1, e2)
+}
+| arg1 = noattr_expression ;
+  f = infix_ident ;
+  arg2 = expression ; {
+  FunCall (f, [arg1; arg2])
 }
 | pos = pos(EXISTS) ; i = mbinder ;
   AMONG ; coll = expression ;
@@ -946,10 +978,20 @@ let code_item :=
     topdef_infix = false;
   }, []
 }
-| DECLARATION ; LESSER ; name = lident ;
-  GREATER ; CONTENT ; ty = addpos(typ) ;
+| DECLARATION ; s = INFIX_IDENT ;
+  CONTENT ; ty = addpos(typ) ;
   args = depends_stance ;
   topdef_expr = option(opt_def) ; {
+  let name =
+    match infix_ident_parts s $loc(s) with
+    | [], ((id, pos) as name) ->
+      if Localisation.lex_builtin id <> None then
+        Message.delayed_error name ~kind:Parsing ~pos "Reserved builtin name"
+      else name
+    | (_, pos) :: _, _ ->
+      Message.error ~kind:Parsing ~pos
+        "A module path is not allowed in the name of a declaration"
+  in
   Topdef {
     topdef_name = name;
     topdef_args = args;

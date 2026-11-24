@@ -732,6 +732,11 @@ let rec lex_code (lexbuf : lexbuf) : token =
     L.update_acc lexbuf;
     DECIMAL_LITERAL
       (dec_parts 1, dec_parts 2)
+  | '<', Star (uppercase, Star idchar, '.'), lowercase, Star idchar, '>' ->
+      (* Infix function call [a <f> b]: the brackets are removed *)
+      L.update_acc lexbuf;
+      let s = Utf8.lexeme lexbuf in
+      INFIX_IDENT (String.sub s 1 (String.length s - 2))
   | "<=", op_kind_re ->
       let k = op_kind (String.remove_prefix ~prefix:"<=" (Utf8.lexeme lexbuf)) in
       L.update_acc lexbuf;
