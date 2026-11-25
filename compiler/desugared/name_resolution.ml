@@ -79,6 +79,7 @@ type module_context = {
       (** The names of the enum constructors. Constructor names can be shared
           between different enums *)
   topdefs : TopdefName.t Ident.Map.t;  (** Global definitions *)
+  infix_topdefs : TopdefName.t Ident.Map.t;  (** Global infix definitions *)
   used_modules : ModuleName.t Ident.Map.t;
   is_external : bool;
 }
@@ -87,6 +88,7 @@ type module_context = {
 type context = {
   scopes : scope_context ScopeName.Map.t;  (** For each scope, its context *)
   topdefs : (typ * visibility) TopdefName.Map.t;
+      (** Types associated with the global definitions *)
   structs : (struct_context * visibility) StructName.Map.t;
       (** For each struct, its context *)
   enums : (enum_context * visibility) EnumName.Map.t;
@@ -1026,8 +1028,29 @@ let process_abstract_typedecl
   }
 
 let process_topdef ?(visibility = Public) ctxt def =
+  let name = Mark.remove def.Surface.Ast.topdef_name in
   let uid =
-    Ident.Map.find (Mark.remove def.Surface.Ast.topdef_name) ctxt.local.topdefs
+    if def.Surface.Ast.topdef_infix then (
+      let uid = Ident.Map.find name ctxt.local.infix_topdefs in
+      (* A prefix and an infix topdef can't share the same name in a module:
+         the name is used as identifier when the module is exported. The check
+         is only done on the infix side, so that the error is raised once, and
+         both maps are complete at this point whatever the declaration
+         order. *)
+      (match Ident.Map.find_opt name ctxt.local.topdefs with
+      | Some prefix_uid ->
+        Message.error
+          ~extra_pos:
+            [
+              "Prefix declaration:", Mark.get (TopdefName.get_info prefix_uid);
+              "Infix declaration:", Mark.get (TopdefName.get_info uid);
+            ]
+          "A prefix and an infix top-level function cannot share the same name \
+           @{<yellow>%s@} in a module: rename one of them."
+          name
+      | None -> ());
+      uid)
+    else Ident.Map.find name ctxt.local.topdefs
   in
   let ty = process_type ctxt def.Surface.Ast.topdef_type in
   let ty =
@@ -1300,6 +1323,18 @@ let process_name_item
     if is_external then
       raise_forbidden_in_external_error (Mark.get s_use.scope_use_name);
     ctxt
+  | Topdef def when def.topdef_infix ->
+    let name, pos = def.topdef_name in
+    let pos = translate_pos Topdef pos in
+    let uid =
+      match Ident.Map.find_opt name ctxt.local.infix_topdefs with
+      | None -> TopdefName.fresh path (name, pos)
+      | Some uid -> uid
+      (* Topdef declaration may appear multiple times as long as their types
+         match and only one contains an expression defining it *)
+    in
+    let infix_topdefs = Ident.Map.add name uid ctxt.local.infix_topdefs in
+    { ctxt with local = { ctxt.local with infix_topdefs } }
   | Topdef def ->
     let name, pos = def.topdef_name in
     let pos = translate_pos Topdef pos in
@@ -1588,6 +1623,42 @@ let process_use_item
 
 (** {1 API} *)
 
+(** {2 Debug printing} *)
+
+let format_typedef fmt = function
+  | TStruct t -> Format.fprintf fmt "struct %a" StructName.format t
+  | TEnum t -> Format.fprintf fmt "enum %a" EnumName.format t
+  | TAbstract t -> Format.fprintf fmt "abstract %a" AbstractType.format t
+  | TScope (s, _) -> Format.fprintf fmt "scope %a" ScopeName.format s
+
+let format_module_context fmt (mctx : module_context) =
+  let sep fmt () = Format.fprintf fmt ";@ " in
+  let field name pp x =
+    Format.fprintf fmt "@,@[<hv 2>%s:@ {@[<hv>%a@]}@]" name pp x
+  in
+  Format.fprintf fmt "@[<v 2>module_context {";
+  Format.fprintf fmt "@,current_revpath: [%a]"
+    (Format.pp_print_list ~pp_sep:sep ModuleName.format)
+    mctx.current_revpath;
+  field "typedefs" (Ident.Map.format ~pp_sep:sep format_typedef) mctx.typedefs;
+  field "field_idmap"
+    (Ident.Map.format ~pp_sep:sep
+       (StructName.Map.format ~pp_sep:sep StructField.format))
+    mctx.field_idmap;
+  field "constructor_idmap"
+    (Ident.Map.format ~pp_sep:sep
+       (EnumName.Map.format ~pp_sep:sep EnumConstructor.format))
+    mctx.constructor_idmap;
+  field "topdefs" (Ident.Map.format ~pp_sep:sep TopdefName.format) mctx.topdefs;
+  field "infix_topdefs"
+    (Ident.Map.format ~pp_sep:sep TopdefName.format)
+    mctx.infix_topdefs;
+  field "used_modules"
+    (Ident.Map.format ~pp_sep:sep ModuleName.format)
+    mctx.used_modules;
+  Format.fprintf fmt "@,is_external: %b" mctx.is_external;
+  Format.fprintf fmt "@]@,}"
+
 let empty_module_ctxt _lang =
   {
     current_revpath = [];
@@ -1595,6 +1666,7 @@ let empty_module_ctxt _lang =
     field_idmap = Ident.Map.empty;
     constructor_idmap = Ident.Map.empty;
     topdefs = Ident.Map.empty;
+    infix_topdefs = Ident.Map.empty;
     used_modules = Ident.Map.empty;
     is_external = false;
   }

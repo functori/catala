@@ -1,0 +1,35 @@
+```catala
+declaration <add>
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x + y
+
+declaration scope T:
+  output x content integer
+
+scope T:
+  definition x equals add of 5, 6
+  assertion (x = 11)
+```
+
+```catala-test-cli
+$ catala test-scope T
+┌─[ERROR]─
+│
+│  "add": unknown identifier for a local, scope-wide or global variable.
+│  There is an infix top-level function named add: did you mean to call it with the infix syntax x <add> y?
+│
+├─➤ tests/func/bad/bad_call_infix.catala_en:12.23-26:
+│    │
+│ 12 │   definition x equals add of 5, 6
+│    │                       ‾‾‾
+│
+│ Infix declaration:
+├─➤ tests/func/bad/bad_call_infix.catala_en:2.14-17:
+│   │
+│ 2 │ declaration <add>
+│   │              ‾‾‾
+└─
+#return code 123#
+```

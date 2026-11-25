@@ -341,7 +341,7 @@ let naked_expression ==
 | e1 = noattr_expression ;
   OF ;
   args = funcall_args ; {
-  FunCall (e1, args)
+  FunCall (e1, args, false)
 }
 | OUTPUT ; OF ;
   c = addpos(quident) ;
@@ -412,7 +412,7 @@ let naked_expression ==
 | arg1 = noattr_expression ;
   f = infix_ident ;
   arg2 = expression ; {
-  FunCall (f, [arg1; arg2])
+  FunCall (f, [arg1; arg2], true)
 }
 | pos = pos(EXISTS) ; i = mbinder ;
   AMONG ; coll = expression ;

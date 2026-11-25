@@ -1,0 +1,28 @@
+```catala
+declaration add
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x + y
+
+declaration scope T:
+  output x content integer
+
+scope T:
+  definition x equals 5 <add> 6
+  assertion (x = 11)
+```
+
+```catala-test-cli
+$ catala test-scope T
+┌─[ERROR]─
+│
+│  There is no top-level function add declared as infix. To call it as <add>, it must be declared with declaration <add>.
+│
+├─➤ tests/func/bad/call_non_infix.catala_en:12.25-30:
+│    │
+│ 12 │   definition x equals 5 <add> 6
+│    │                         ‾‾‾‾‾
+└─
+#return code 123#
+```

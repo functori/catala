@@ -5,17 +5,22 @@ declaration <add>
   equals
     x + y
 
-declaration scope S:
-  output x content integer
 
-scope S:
-  definition x equals add of 5, 6
-  assertion (x = 11)
+declaration scope T:
+  output x content integer
+  output y content integer
+
+scope T:
+  definition x equals 5 <add> 10
+  definition y equals 6 <add> 3
+  assertion (x = 15)
+  assertion (y = 9)
 ```
 
 ```catala-test-cli
-$ catala test-scope S
-┌─[RESULT]─ S ─
-│ x = 11
+$ catala test-scope T
+┌─[RESULT]─ T ─
+│ x = 15
+│ y = 9
 └─
 ```

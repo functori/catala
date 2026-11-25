@@ -83,6 +83,7 @@ type module_context = {
           are included here for the root module, because disambiguating there is
           helpful. *)
   topdefs : TopdefName.t Ident.Map.t;  (** Global definitions *)
+  infix_topdefs : TopdefName.t Ident.Map.t;  (** Global infix definitions *)
   used_modules : ModuleName.t Ident.Map.t;
       (** Module aliases and the modules they point to *)
   is_external : bool;
@@ -108,6 +109,9 @@ type context = {
           analysed *)
 }
 (** Global context used throughout {!module: Desugared.From_surface} *)
+
+val format_module_context : Format.formatter -> module_context -> unit
+(** Prints the whole module context, for debugging purposes *)
 
 (** {1 Attribute handling} *)
 

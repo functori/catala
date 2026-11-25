@@ -1,0 +1,27 @@
+> Using Fun_lib
+
+```catala
+declaration add
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x + y
+
+declaration scope T:
+  output x content integer
+  output y content integer
+
+scope T:
+  definition x equals add of 6, 3
+  definition y equals 6 <Fun_lib.add> 3
+  assertion (x = 9)
+  assertion (y = 3)
+```
+
+```catala-test-cli
+$ catala test-scope T
+┌─[RESULT]─ T ─
+│ x = 9
+│ y = 3
+└─
+```

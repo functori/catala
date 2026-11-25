@@ -1,0 +1,43 @@
+A prefix and an infix top-level function cannot share the same name in a
+module.
+
+```catala
+declaration <add>
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x - y
+
+declaration add
+  content integer
+  depends on x content integer, y content integer
+  equals
+    x + y
+
+declaration scope T:
+  output x content integer
+
+scope T:
+  definition x equals add of 6, 3
+```
+
+```catala-test-cli
+$ catala test-scope T
+┌─[ERROR]─
+│
+│  A prefix and an infix top-level function cannot share the same name add in a module: rename one of them.
+│
+│ Prefix declaration:
+├─➤ tests/func/bad/same_name_infix_prefix.catala_en:11.13-16:
+│    │
+│ 11 │ declaration add
+│    │             ‾‾‾
+│
+│ Infix declaration:
+├─➤ tests/func/bad/same_name_infix_prefix.catala_en:5.14-17:
+│   │
+│ 5 │ declaration <add>
+│   │              ‾‾‾
+└─
+#return code 123#
+```

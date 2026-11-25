@@ -166,7 +166,7 @@ and naked_expression =
   | Binop of binop Mark.pos * expression * expression
   | Ternop of ternop Mark.pos * expression * expression * expression
   | TestMatchCase of expression * match_case_pattern Mark.pos
-  | FunCall of expression * expression list
+  | FunCall of expression * expression list * bool
   | ScopeCall of
       (path * uident Mark.pos) Mark.pos * (lident Mark.pos * expression) list
   | LetIn of lident Mark.pos list * expression * expression

@@ -653,6 +653,28 @@ let nary_binder_to_tuple_function arg_ty pos binder argname pos_binder =
     [List.fold_left Pos.join Pos.void pos_binder]
     [arg_ty] m
 
+(** Raises the "unknown identifier" error for [name], with a hint if an infix
+    top-level function has this name in [ctxt]: a function declared as
+    [declaration <f>] can only be called as [x <f> y]. *)
+let raise_unknown_identifier_or_infix
+    (ctxt : Name_resolution.context)
+    (path : S.path)
+    (msg : string)
+    ((name, pos) : Ident.t Mark.pos) =
+  match Ident.Map.find_opt name ctxt.local.infix_topdefs with
+  | None -> Name_resolution.raise_unknown_identifier msg (name, pos)
+  | Some infix_uid ->
+    let qualified_name =
+      String.concat "." (List.map Mark.remove path @ [name])
+    in
+    Message.error ~pos
+      ~extra_pos:
+        ["Infix declaration:", Mark.get (TopdefName.get_info infix_uid)]
+      "@{<yellow>\"%s\"@}: unknown identifier %s.@ There is an infix top-level \
+       function named @{<yellow>%s@}: did you mean to call it with the infix \
+       syntax @{<yellow>x <%s> y@}?"
+      name msg name qualified_name
+
 (** Usage: [translate_expr scope ctxt naked_expr]
 
     Translates [expr] into its desugared equivalent. [scope] is used to
@@ -805,7 +827,7 @@ let rec translate_expr
                })
             emark
         | None ->
-          Name_resolution.raise_unknown_identifier
+          raise_unknown_identifier_or_infix ctxt []
             "for a local, scope-wide or global variable" (x, pos))))
   | Ident (_ :: _, (_, pos), Some _) ->
     Message.error ~pos
@@ -830,7 +852,8 @@ let rec translate_expr
            })
         emark
     | None ->
-      Name_resolution.raise_unknown_identifier "for an external variable" name)
+      raise_unknown_identifier_or_infix ctxt path "for an external variable"
+        name)
   | Dotted (e, ((path, field), _ppos)) ->
     (* e.x is the struct field x access of expression e *)
     let e = rec_helper e in
@@ -841,9 +864,9 @@ let rec translate_expr
         get_str (Name_resolution.get_module_ctx ctxt mod_id) path
     in
     Expr.edstructaccess ~e ~field ~name_opt:(get_str ctxt path) emark
-  | FunCall ((Builtin (S.Impossible | S.External _), pos), [_]) ->
+  | FunCall ((Builtin (S.Impossible | S.External _), pos), [_], false) ->
     Message.error ~pos "This built-in cannot be applied as a function"
-  | FunCall ((Builtin b, pos), [arg]) ->
+  | FunCall ((Builtin b, pos), [arg], false) ->
     let op, ty =
       match b with
       | S.ToInteger -> Op.ToInt, Mark.remove (Type.any pos)
@@ -882,9 +905,44 @@ let rec translate_expr
         emark)
   | S.Builtin _ ->
     Message.error ~pos "Invalid use of built-in: needs one operand"
-  | FunCall (f, args) ->
+  | FunCall (f, args, false) ->
     let args = List.map rec_helper args in
     Expr.eapp ~f:(rec_helper f) ~args ~tys:[] emark
+  | FunCall (f, args, true) -> (
+    (* Call of an infix function *)
+    match f with
+    | Ident (path, ident, None), pos -> (
+      let ml, ctxt = Name_resolution.module_ctx ctxt path in
+      match Ident.Map.find_opt (Mark.remove ident) ctxt.local.infix_topdefs with
+      | Some topdef ->
+        let path : Uid.Path.t =
+          List.map2
+            (fun (_, pos) mname ->
+              ModuleName.map_info (fun (name, _) -> name, pos) mname)
+            path ml
+        in
+        let v = TopdefName.map_info (fun _ -> path, ident) topdef in
+        let f =
+          Expr.elocation
+            (ToplevelVar
+               {
+                 name = v, Mark.get (TopdefName.get_info v);
+                 is_external = ctxt.local.is_external;
+               })
+            emark
+        in
+        let args = List.map rec_helper args in
+        Expr.eapp ~f ~args ~tys:[] emark
+      | None when Ident.Map.mem (Mark.remove ident) ctxt.local.topdefs ->
+        Message.error ~pos
+          "There is no top-level function @{<yellow>%s@} declared as infix. To \
+           call it as @{<yellow><%s>@}, it must be declared with \
+           @{<yellow>declaration <%s>@}."
+          (Mark.remove ident) (Mark.remove ident) (Mark.remove ident)
+      | None ->
+        Message.error ~pos "No top-level function named @{<yellow>%s@} %a"
+          (Mark.remove ident) Name_resolution.format_module_context ctxt.local)
+    | _ -> Message.error "Oups")
   | ScopeCall (((path, id), _), fields) ->
     if scope = None then
       Message.error ~pos "Scope calls are not allowed outside of a scope.";
@@ -1779,7 +1837,8 @@ let process_topdef
   let id =
     Ident.Map.find
       (Mark.remove def.S.topdef_name)
-      ctxt.Name_resolution.local.topdefs
+      (if def.topdef_infix then ctxt.Name_resolution.local.infix_topdefs
+       else ctxt.Name_resolution.local.topdefs)
   in
   let translate_typ t = Name_resolution.process_type ctxt t in
   let typ = translate_typ def.S.topdef_type in
@@ -2062,21 +2121,24 @@ let translate_program
         (* This will be populated later on *)
         TopdefName.Map.empty
       else
-        Ident.Map.fold
-          (fun _ name acc ->
-            let topdef_type, topdef_visibility =
-              TopdefName.Map.find name ctxt.Name_resolution.topdefs
-            in
-            TopdefName.Map.add name
-              {
-                Ast.topdef_expr = None;
-                topdef_visibility;
-                topdef_type;
-                topdef_arg_names = [];
-                topdef_is_external = mctx.is_external;
-              }
-              acc)
-          mctx.topdefs TopdefName.Map.empty
+        let update_topdef _ name acc =
+          let topdef_type, topdef_visibility =
+            TopdefName.Map.find name ctxt.Name_resolution.topdefs
+          in
+          TopdefName.Map.add name
+            {
+              Ast.topdef_expr = None;
+              topdef_visibility;
+              topdef_type;
+              topdef_arg_names = [];
+              topdef_is_external = mctx.is_external;
+            }
+            acc
+        in
+        let acc =
+          Ident.Map.fold update_topdef mctx.topdefs TopdefName.Map.empty
+        in
+        Ident.Map.fold update_topdef mctx.infix_topdefs acc
     in
     ModuleName.Map.mapi
       (fun mname mctx ->

@@ -1,0 +1,9 @@
+> Module Fun_lib
+
+```catala-metadata
+declaration <add>
+  content integer
+  depends on u content integer, w content integer
+  equals
+    u - w
+```
